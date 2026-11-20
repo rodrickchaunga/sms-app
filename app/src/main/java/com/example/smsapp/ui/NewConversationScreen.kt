@@ -16,9 +16,6 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-data class ContactEntry(val name: String, val number: String)
-
-suspend fun loadContacts(context: Context): List<ContactEntry> = withContext(Dispatchers.IO) {
     val result = mutableListOf<ContactEntry>()
     val projection = arrayOf(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME, ContactsContract.CommonDataKinds.Phone.NUMBER)
     context.contentResolver.query(ContactsContract.CommonDataKinds.Phone.CONTENT_URI, projection, null, null, ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME + " COLLATE NOCASE")?.use { c ->

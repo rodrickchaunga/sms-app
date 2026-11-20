@@ -31,7 +31,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-private val Transparent = ListItemDefaults.colors(containerColor = Color.Transparent)
+@Composable
+private fun getTransparentColors() = ListItemDefaults.colors(containerColor = Color.Transparent)
 
 /** Set a first PIN, or change the existing one (which needs the current PIN). */
 @Composable
@@ -163,9 +164,9 @@ fun PrivateSpaceScreen(repo: SmsRepository, security: VaultSecurity, onOpen: (St
         title = { Text("Add private conversation") },
         text = {
             Column {
-                ListItem(headlineContent = { Text("From conversation list") }, colors = Transparent, modifier = Modifier.clickable { addStep = 2 })
-                ListItem(headlineContent = { Text("From contacts") }, colors = Transparent, modifier = Modifier.clickable { addStep = 3 })
-                ListItem(headlineContent = { Text("Enter number manually") }, colors = Transparent, modifier = Modifier.clickable { addStep = 4 })
+                ListItem(headlineContent = { Text("From conversation list") }, colors = getTransparentColors(), modifier = Modifier.clickable { addStep = 2 })
+                ListItem(headlineContent = { Text("From contacts") }, colors = getTransparentColors(), modifier = Modifier.clickable { addStep = 3 })
+                ListItem(headlineContent = { Text("Enter number manually") }, colors = getTransparentColors(), modifier = Modifier.clickable { addStep = 4 })
             }
         },
         confirmButton = { TextButton(onClick = { addStep = 0 }) { Text("Cancel") } }
@@ -180,7 +181,7 @@ fun PrivateSpaceScreen(repo: SmsRepository, security: VaultSecurity, onOpen: (St
                 else LazyColumn(Modifier.heightIn(max = 360.dp)) {
                     items(existing, key = { it.address }) { c ->
                         val name = rememberDisplayName(c.address)
-                        ListItem(headlineContent = { Text(name) }, supportingContent = { Text(c.body, maxLines = 1) }, colors = Transparent, modifier = Modifier.clickable { addPrivate(c.address) })
+                        ListItem(headlineContent = { Text(name) }, supportingContent = { Text(c.body, maxLines = 1) }, colors = getTransparentColors(), modifier = Modifier.clickable { addPrivate(c.address) })
                     }
                 }
             },
@@ -230,11 +231,11 @@ fun PrivateSpaceScreen(repo: SmsRepository, security: VaultSecurity, onOpen: (St
         title = { Text("Private settings") },
         text = {
             Column {
-                ListItem(headlineContent = { Text("PIN") }, supportingContent = { Text("Change the PIN that opens this space") }, colors = Transparent,
+                ListItem(headlineContent = { Text("PIN") }, supportingContent = { Text("Change the PIN that opens this space") }, colors = getTransparentColors(),
                     trailingContent = { TextButton(onClick = { showChangePin = true }) { Text("Change") } })
-                ListItem(headlineContent = { Text("Fingerprint / device unlock") }, supportingContent = { Text("The PIN always works") }, colors = Transparent,
+                ListItem(headlineContent = { Text("Fingerprint / device unlock") }, supportingContent = { Text("The PIN always works") }, colors = getTransparentColors(),
                     trailingContent = { Switch(vaultBiometric, { vaultBiometric = it; prefs.edit().putBoolean("vault_biometric", it).apply() }) })
-                ListItem(headlineContent = { Text("Notifications") }, supportingContent = { Text("Generic shows only \"New message\" with no name or text") }, colors = Transparent)
+                ListItem(headlineContent = { Text("Notifications") }, supportingContent = { Text("Generic shows only \"New message\" with no name or text") }, colors = getTransparentColors())
                 Box(Modifier.padding(horizontal = 16.dp)) {
                     ChoiceChips(listOf("generic", "off"), notifyMode, { if (it == "generic") "Generic" else "None" }) { mode ->
                         notifyMode = mode

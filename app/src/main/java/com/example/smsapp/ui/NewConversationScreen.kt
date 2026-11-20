@@ -16,6 +16,29 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
+
+suspend fun loadContacts(context: Context): List<ContactEntry> = withContext(Dispatchers.IO) {
+    val result = mutableListOf<ContactEntry>()
+    val projection = arrayOf(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME, ContactsContract.CommonDataKinds.Phone.NUMBER)
+    context.contentResolver.query(ContactsContract.CommonDataKinds.Phone.CONTENT_URI, projection, null, null, ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME + " COLLATE NOCASE")?.use { c ->
+        val name = c.getColumnIndexOrThrow(projection[0]); val number = c.getColumnIndexOrThrow(projection[1])
+        while (c.moveToNext()) result += ContactEntry(c.getString(name).orEmpty(), c.getString(number).orEmpty())
+    }
+    result.distinctBy { it.number }
+}
+
+/**
+ * Pick a person for a conversation: search the contact list, or (when [allowTypedNumber]) type a number.
+ * Used for "new conversation" and for choosing a contact inside the private space.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun NewConversationScreen(
+    title: String = "New conversation",
+    allowTypedNumber: Boolean = true,
+    onBack: () -> Unit,
+    onChoose: (String) -> Unit
+) {
     val context = LocalContext.current
     var contacts by remember { mutableStateOf<List<ContactEntry>?>(null) }
     var query by remember { mutableStateOf("") }

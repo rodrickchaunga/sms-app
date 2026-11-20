@@ -15,7 +15,7 @@
 
     <application
         android:name=".SmsApp"
-        android:label="Messages"
+        android:icon="@drawable/ic_launcher" android:label="Messages"
         android:allowBackup="false"
         android:fullBackupContent="false"
         android:dataExtractionRules="@xml/data_extraction_rules"

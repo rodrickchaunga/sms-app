@@ -42,6 +42,7 @@ fun SmsNavHost(repo: SmsRepository, launch: LaunchRequest?) {
     var isPrivateSession by remember { mutableStateOf(false) }
     var inPrivateSpace by remember { mutableStateOf(false) }
     var showNewConversation by remember { mutableStateOf(false) }
+    var showArchived by remember { mutableStateOf(false) }
     var showUnlock by remember { mutableStateOf(false) }
     var showPinSetup by remember { mutableStateOf(false) }
     var selectedTab by rememberSaveable { mutableIntStateOf(0) }
@@ -127,6 +128,11 @@ fun SmsNavHost(repo: SmsRepository, launch: LaunchRequest?) {
         prompt.authenticate(BiometricPrompt.PromptInfo.Builder().setTitle("Unlock").setSubtitle("Authenticate to continue").setNegativeButtonText("Use PIN").setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_STRONG).build())
     }
 
+    // If fingerprint / device unlock is enabled and available, ask for it straight away instead of waiting for a tap.
+    LaunchedEffect(showUnlock) {
+        if (showUnlock && context.getSharedPreferences("sms_settings", android.content.Context.MODE_PRIVATE).getBoolean("vault_biometric", true)) openBiometric()
+    }
+
     if (showUnlock) {
         AlertDialog(onDismissRequest = { showUnlock = false; pinEntry = "" }, title = { Text("Enter PIN") }, text = {
             androidx.compose.foundation.layout.Column {
@@ -160,6 +166,8 @@ fun SmsNavHost(repo: SmsRepository, launch: LaunchRequest?) {
             onDelete = { scope.launch { repo.deleteConversation(openChat); closeChat() } })
     } else if (showNewConversation) {
         NewConversationScreen(onBack = { showNewConversation = false }, onChoose = ::openAddress)
+    } else if (showArchived) {
+        ArchivedScreen(repo, onBack = { showArchived = false }, onOpen = ::openAddress)
     } else if (inPrivateSpace) {
         PrivateSpaceScreen(repo, security,
             onOpen = { address -> currentAddress = address; isPrivateSession = true },
@@ -175,7 +183,7 @@ fun SmsNavHost(repo: SmsRepository, launch: LaunchRequest?) {
             when (selectedTab) {
                 0 -> ConversationListScreen(repo, onOpen = ::openAddress, onNewConversation = { showNewConversation = true }, onPrivateSpace = ::requestPrivateSpace, modifier = Modifier.padding(padding))
                 1 -> PersonalizeScreen(Modifier.padding(padding))
-                else -> SettingsScreen(repo = repo, onOpenConversation = ::openAddress, onOpenPersonalize = { selectedTab = 1 }, modifier = Modifier.padding(padding))
+                else -> SettingsScreen(repo = repo, onOpenConversation = ::openAddress, onOpenPersonalize = { selectedTab = 1 }, onOpenArchived = { showArchived = true }, modifier = Modifier.padding(padding))
             }
         }
     }

@@ -1,5 +1,24 @@
 # SMS App V2.0 — development status
 
+## Phase 3.6 (this delivery): 12 upgrades
+
+Not compiled in the authoring environment (no Android SDK): fix the first compiler error first. No database change in this delivery.
+
+1. Settings > Archived conversations: list, open, unarchive, delete (long-press to select).
+2. Conversation list: swipe left to archive, swipe right to delete (asks first).
+3. Switch SIM moved from the top bar to the message box, next to Send. It shows only on dual-SIM phones and hides once you start typing. The picker lists only the SIM cards (no "system default" / "app default" rows).
+4. Counter near Send: appears when 10 or fewer characters are left in the current SMS, then shows `remaining/parts` (e.g. 160/2) like Google Messages. Still follows the Settings switches.
+5. "← Back" text buttons replaced by a back arrow.
+6. Jump-to-latest button in a chat; shows only after scrolling up.
+7. Composer capitalises the first letter of each sentence.
+8. Message bubbles are limited to 75% of the screen width.
+9. Fingerprint / device unlock is requested automatically when the private-space PIN dialog opens (if enabled and available).
+10. Keyboard no longer pushes the header off screen (`adjustResize` plus IME padding in the chat).
+11. A new conversation with no messages shows "This is the start of a new conversation. Say something nice!". Going back without sending leaves no empty conversation in the list.
+12. Failed messages show "Retry" (under the message, and in message info). Retry re-sends in place, with a fresh time, clearing the old failed state.
+
+---
+
 ## Phase 3.5 (this delivery): private space, chat screen, delivery reports
 
 Phases 1 to 3 have been compiled and run on a real device. This delivery has NOT been compiled (no Android SDK in the authoring environment): fix the first compiler error first. Room database version is now 8 (migration 7->8: `deliveredAt`/`receivedAt` on messages, theme columns on `conversation_prefs`).
@@ -27,7 +46,6 @@ Phases 1 to 3 have been compiled and run on a real device. This delivery has NOT
 - Settings: Storage section removed (only About remains). Removed unused code: vault list query, storage counters, old contacts screen, unused scheduled-SMS and prefs queries.
 
 ### Known gaps
-- Archived conversations still have no screen to view or unarchive them (the bulk list therefore offers delete only).
 - The scheduled-message list still labels hidden private rows "Private number" / "Private message".
 
 ---

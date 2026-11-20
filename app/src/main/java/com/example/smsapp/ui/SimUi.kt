@@ -22,13 +22,13 @@ fun SimPickerDialog(
     title: String,
     sims: List<SimInfo>,
     current: Int?,
-    nullLabel: String,
+    nullLabel: String?,
     showSystemOption: Boolean,
     onSelect: (Int?) -> Unit,
     onDismiss: () -> Unit
 ) {
     val options = buildList<Pair<Int?, String>> {
-        add(Pair(null, nullLabel))
+        if (nullLabel != null) add(Pair(null, nullLabel))
         if (showSystemOption) add(Pair(SimManager.SYSTEM_DEFAULT, "System default SIM"))
         sims.forEach { add(Pair(it.subscriptionId, it.label)) }
     }

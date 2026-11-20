@@ -7,6 +7,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.Icons
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -16,6 +18,7 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
+data class ContactEntry(val name: String, val number: String)
 
 suspend fun loadContacts(context: Context): List<ContactEntry> = withContext(Dispatchers.IO) {
     val result = mutableListOf<ContactEntry>()
@@ -46,7 +49,7 @@ fun NewConversationScreen(
     BackHandler(onBack = onBack)
 
     Scaffold(topBar = {
-        TopAppBar(title = { Text(title) }, navigationIcon = { TextButton(onClick = onBack) { Text("← Back", fontWeight = FontWeight.Bold) } })
+        TopAppBar(title = { Text(title) }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") } })
     }) { padding ->
         Column(Modifier.padding(padding).fillMaxSize()) {
             OutlinedTextField(

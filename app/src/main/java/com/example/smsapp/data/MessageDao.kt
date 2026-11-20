@@ -42,6 +42,9 @@ interface MessageDao {
     fun conversations(): Flow<List<ConversationPreview>>
     @Query("SELECT address, body, MAX(timestamp) AS timestamp, SUM(CASE WHEN outgoing = 0 AND isRead = 0 THEN 1 ELSE 0 END) AS unread FROM messages WHERE isVaulted = 0 AND isSpam = 0 AND isArchived = 0 AND (address LIKE '%' || :query || '%' ESCAPE '\\' OR body LIKE '%' || :query || '%' ESCAPE '\\') GROUP BY address ORDER BY timestamp DESC")
     fun searchConversations(query: String): Flow<List<ConversationPreview>>
+    @Query("SELECT address, body, MAX(timestamp) AS timestamp, 0 AS unread FROM messages WHERE isVaulted = 0 AND isSpam = 0 AND isArchived = 1 GROUP BY address ORDER BY timestamp DESC")
+    fun archivedConversations(): Flow<List<ConversationPreview>>
+    @Query("UPDATE messages SET status = 'sending', timestamp = :now, deliveredAt = NULL, providerId = NULL WHERE id = :id AND outgoing = 1 AND status LIKE 'failed%'") suspend fun resetForRetry(id: Long, now: Long): Int
     @Query("SELECT * FROM messages WHERE isStarred = 1 AND isVaulted = 0 ORDER BY timestamp DESC") fun starred(): Flow<List<MessageEntity>>
     /** Every number in the private space (including ones with no messages yet), newest activity first. */
     @Query("SELECT v.address AS address, COALESCE((SELECT m.body FROM messages m WHERE m.address = v.address AND m.isVaulted = 1 ORDER BY m.timestamp DESC LIMIT 1), '') AS body, COALESCE((SELECT MAX(m.timestamp) FROM messages m WHERE m.address = v.address AND m.isVaulted = 1), v.addedAt) AS timestamp, (SELECT COUNT(*) FROM messages m WHERE m.address = v.address AND m.isVaulted = 1 AND m.outgoing = 0 AND m.isRead = 0) AS unread FROM vaulted_numbers v ORDER BY timestamp DESC")

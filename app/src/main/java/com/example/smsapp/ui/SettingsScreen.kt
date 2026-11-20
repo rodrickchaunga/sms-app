@@ -23,7 +23,7 @@ import androidx.compose.foundation.lazy.items
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsScreen(repo: SmsRepository, onOpenConversation: (String) -> Unit, onOpenPersonalize: () -> Unit = {}, modifier: Modifier = Modifier) {
+fun SettingsScreen(repo: SmsRepository, onOpenConversation: (String) -> Unit, onOpenPersonalize: () -> Unit = {}, onOpenArchived: () -> Unit = {}, modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val prefs = remember { context.getSharedPreferences("sms_settings", Context.MODE_PRIVATE) }
@@ -114,6 +114,7 @@ fun SettingsScreen(repo: SmsRepository, onOpenConversation: (String) -> Unit, on
             HorizontalDivider()
             Text("Tools", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 12.dp))
             ListItem(headlineContent = { Text("Starred messages") }, supportingContent = { Text("${starredMessages.size} saved messages") }, trailingContent = { TextButton(onClick = { showStarred = true }) { Text("View") } })
+            ListItem(headlineContent = { Text("Archived conversations") }, supportingContent = { Text("View and unarchive") }, trailingContent = { TextButton(onClick = onOpenArchived) { Text("Open") } })
             ListItem(headlineContent = { Text("Schedule a message") }, supportingContent = { Text("${scheduledItems.count { it.status == "pending" || it.status == "sending" }} pending, ${scheduledItems.count { it.status == "failed" }} failed") }, trailingContent = { Row { TextButton(onClick = { showScheduled = true }) { Text("View") }; TextButton(onClick = { showSchedule = true }) { Text("New") } } })
             ListItem(headlineContent = { Text("Spam and blocked conversations") }, supportingContent = { Text("View and unblock blocked numbers") }, trailingContent = { TextButton(onClick = { showSpam = true }) { Text("Manage") } })
             ListItem(headlineContent = { Text("MMS") }, supportingContent = { Text("Not implemented yet: picture, video and group MMS are planned") })

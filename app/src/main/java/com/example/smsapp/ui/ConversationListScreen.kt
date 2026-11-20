@@ -10,6 +10,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AddComment
+import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
@@ -71,6 +72,7 @@ fun ConversationListScreen(
 
     var selected by remember { mutableStateOf(setOf<String>()) }
     var confirmDelete by remember { mutableStateOf(false) }
+    var pendingSwipeDelete by remember { mutableStateOf<String?>(null) }
     val selecting = selected.isNotEmpty()
     BackHandler(enabled = selecting) { selected = emptySet() }
     // Forget selected conversations that disappear from the list (deleted, or filtered out by a new search).
@@ -145,17 +147,53 @@ fun ConversationListScreen(
                 }
             }
             items(list, key = { it.address }) { c ->
-                ContactListItem(
-                    address = c.address, body = c.body, timestamp = c.timestamp, unread = c.unread,
-                    selected = c.address in selected,
-                    onClick = { if (selecting) toggle(c.address) else onOpen(c.address) },
-                    onLongClick = { toggle(c.address) }
-                )
-                HorizontalDivider(thickness = 0.5.dp, color = Color.LightGray.copy(alpha = 0.5f))
+                // Swipe left to archive, swipe right to delete (asks first, then the row snaps back).
+                val dismissState = rememberSwipeToDismissBoxState(confirmValueChange = { value ->
+                    when (value) {
+                        SwipeToDismissBoxValue.EndToStart -> { scope.launch { repo.archive(c.address, true) }; true }
+                        SwipeToDismissBoxValue.StartToEnd -> { pendingSwipeDelete = c.address; false }
+                        else -> false
+                    }
+                })
+                SwipeToDismissBox(
+                    state = dismissState,
+                    enableDismissFromStartToEnd = !selecting,
+                    enableDismissFromEndToStart = !selecting,
+                    backgroundContent = {
+                        val toDelete = dismissState.dismissDirection == SwipeToDismissBoxValue.StartToEnd
+                        Box(
+                            Modifier.fillMaxSize()
+                                .background(if (toDelete) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.secondaryContainer)
+                                .padding(horizontal = 24.dp),
+                            contentAlignment = if (toDelete) Alignment.CenterStart else Alignment.CenterEnd
+                        ) {
+                            Icon(if (toDelete) Icons.Default.Delete else Icons.Default.Archive, contentDescription = if (toDelete) "Delete" else "Archive")
+                        }
+                    }
+                ) {
+                    Column(Modifier.background(MaterialTheme.colorScheme.background)) {
+                        ContactListItem(
+                            address = c.address, body = c.body, timestamp = c.timestamp, unread = c.unread,
+                            selected = c.address in selected,
+                            onClick = { if (selecting) toggle(c.address) else onOpen(c.address) },
+                            onLongClick = { toggle(c.address) }
+                        )
+                        HorizontalDivider(thickness = 0.5.dp, color = Color.LightGray.copy(alpha = 0.5f))
+                    }
+                }
             }
         }
     }
 
+    pendingSwipeDelete?.let { address ->
+        AlertDialog(
+            onDismissRequest = { pendingSwipeDelete = null },
+            title = { Text("Delete conversation?") },
+            text = { Text("This removes it from this app and its SMS provider rows. This cannot be undone.") },
+            confirmButton = { TextButton(onClick = { pendingSwipeDelete = null; scope.launch { runCatching { repo.deleteConversation(address) } } }) { Text("Delete") } },
+            dismissButton = { TextButton(onClick = { pendingSwipeDelete = null }) { Text("Cancel") } }
+        )
+    }
     if (confirmDelete) {
         val count = selected.size
         AlertDialog(

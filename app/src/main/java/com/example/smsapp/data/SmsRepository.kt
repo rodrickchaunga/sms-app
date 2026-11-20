@@ -21,6 +21,7 @@ class SmsRepository(private val context: Context, private val dao: MessageDao) {
         dao.searchConversations(query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_"))
     fun thread(addr: String): Flow<List<MessageEntity>> = dao.thread(addr)
     fun privateThread(addr: String): Flow<List<MessageEntity>> = dao.privateThread(addr).map { rows -> rows.map { it.copy(body = runCatching { VaultCrypto.decrypt(it.body) }.getOrDefault("[Unable to decrypt private message]")) } }
+    fun archivedConversations(): Flow<List<ConversationPreview>> = dao.archivedConversations()
     fun starred(): Flow<List<MessageEntity>> = dao.starred()
     fun privateConversations(): Flow<List<ConversationPreview>> = dao.privateConversations().map { rows -> rows.map { it.copy(body = runCatching { VaultCrypto.decrypt(it.body) }.getOrDefault("")) } }
     fun spam(): Flow<List<MessageEntity>> = dao.spam()
@@ -38,7 +39,7 @@ class SmsRepository(private val context: Context, private val dao: MessageDao) {
     }
 
     /** Returns the local message id. subscriptionId null = resolve from conversation / app preference. */
-    suspend fun send(address: String, body: String, deliveryReports: Boolean = false, subscriptionId: Int? = null): Long = withContext(Dispatchers.IO) {
+    suspend fun send(address: String, body: String, deliveryReports: Boolean = false, subscriptionId: Int? = null, retryId: Long? = null): Long = withContext(Dispatchers.IO) {
         require(address.isNotBlank()) { "Recipient is required" }
         require(body.isNotBlank()) { "Message cannot be empty" }
         // Resolved before any row is created, so an unavailable SIM never leaves a half-sent message.
@@ -47,7 +48,18 @@ class SmsRepository(private val context: Context, private val dao: MessageDao) {
         val vaulted = isVaulted(address)
         val now = System.currentTimeMillis()
         val storedBody = if (vaulted) VaultCrypto.encrypt(body) else body
-        val localId = dao.insert(MessageEntity(address = address, body = storedBody, timestamp = now, outgoing = true, isVaulted = vaulted, status = "sending"))
+        val localId: Long
+        if (retryId != null) {
+            // Retrying a failed message re-uses its row: drop the old provider copy and the old callback state, then send again.
+            val old = dao.byId(retryId)
+            old?.providerId?.let { id -> runCatching { context.contentResolver.delete(android.content.ContentUris.withAppendedId(Telephony.Sms.CONTENT_URI, id), null, null) } }
+            val callbackPrefs = context.getSharedPreferences("sms_callback_state", Context.MODE_PRIVATE)
+            callbackPrefs.edit().apply { callbackPrefs.all.keys.filter { it.startsWith("${retryId}_") }.forEach { remove(it) } }.apply()
+            check(dao.resetForRetry(retryId, now) == 1) { "This message can no longer be retried" }
+            localId = retryId
+        } else {
+            localId = dao.insert(MessageEntity(address = address, body = storedBody, timestamp = now, outgoing = true, isVaulted = vaulted, status = "sending"))
+        }
         val parts = mgr.divideMessage(body)
         // One unique PendingIntent per message part (the data URI differs), so extras can never be swapped between messages.
         // The delivery-report intent must be mutable: Android attaches the status-report PDU to it, and an immutable
@@ -246,6 +258,13 @@ class SmsRepository(private val context: Context, private val dao: MessageDao) {
         dao.deleteConversation(address, vaulted)
         dao.deleteDraft(address)
         dao.deleteConversationPrefs(address)
+    }
+    /** Sends a failed message again, in place. */
+    suspend fun retrySend(id: Long, deliveryReports: Boolean = false) {
+        val row = dao.byId(id) ?: throw IllegalArgumentException("Message no longer exists")
+        require(row.outgoing && row.status.startsWith("failed")) { "Only a message that failed to send can be retried" }
+        val body = if (row.isVaulted) VaultCrypto.decrypt(row.body) else row.body
+        send(row.address, body, deliveryReports, retryId = id)
     }
     suspend fun forwardMessage(id: Long, recipient: String, deliveryReports: Boolean = false) {
         val row = dao.byId(id) ?: throw IllegalArgumentException("Message no longer exists")

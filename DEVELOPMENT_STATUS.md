@@ -1,5 +1,37 @@
 # SMS App V2.0 — development status
 
+## Phase 3.5 (this delivery): private space, chat screen, delivery reports
+
+Phases 1 to 3 have been compiled and run on a real device. This delivery has NOT been compiled (no Android SDK in the authoring environment): fix the first compiler error first. Room database version is now 8 (migration 7->8: `deliveredAt`/`receivedAt` on messages, theme columns on `conversation_prefs`).
+
+**Private space**
+- Reached only by long-pressing the new-conversation button (a tap still starts a normal new conversation). First use asks for a PIN; afterwards PIN or fingerprint/device unlock.
+- The PIN, fingerprint switch and private notification mode are in the private space (three-dot > Private settings). Settings no longer mention private conversations at all.
+- Inside: list of private conversations with unread badges, "+" to add one (from the conversation list, from contacts, or by typing a number), bulk select (remove from private / delete messages).
+- Long-pressing a conversation in Messages no longer makes it private; it starts bulk selection.
+- Private numbers are never opened outside the space (notification taps, sms: intents, contacts and typed numbers do nothing for them).
+- Private notifications use the normal Messages channel and the same generic "New message" text as hidden notifications, no sender, no actions, and open the app without an address. Option "None" posts nothing. The old separate "Private messages" channel is deleted at start-up. Leaving the app locks the space again; the screen is protected from screenshots while it is open.
+
+**Chat screen**
+- Call button (opens the dialer), tap the name for contact details (details, notification settings, per-conversation theme, block/archive/delete).
+- Time and status are hidden; tap a message to show them. A message that failed to send always shows "Not sent".
+- Long-press a message for info (sent: time and status, plus delivered time when delivered; received: sender's send time and the time this phone received it) and for Select / Copy / Forward / Star / Delete.
+- Bulk selection (copy, select all, delete). Messages sit at the bottom and a chat opens at the newest message.
+
+**Delivery reports**
+- The carrier's delivery callback also fires for "accepted, still trying". The status-report PDU is now decoded and a message is only marked delivered on a final "delivered" status. The delivery PendingIntent is mutable (an immutable one drops the PDU) and every part has its own PendingIntent.
+- If a device returns no readable status report, the message stays "sent".
+
+**Other**
+- Contacts tab removed; the new-conversation button lists contacts and accepts a typed number. A typed or contact number reuses the existing thread for that person, even when stored in a different format.
+- Settings: Storage section removed (only About remains). Removed unused code: vault list query, storage counters, old contacts screen, unused scheduled-SMS and prefs queries.
+
+### Known gaps
+- Archived conversations still have no screen to view or unarchive them (the bulk list therefore offers delete only).
+- The scheduled-message list still labels hidden private rows "Private number" / "Private message".
+
+---
+
 ## Phase 3 (this delivery): personalization, notification controls, settings dashboard
 
 Source written, NOT compiled or device-tested (no Android SDK/Gradle/network in the authoring environment). Phases 1 to 3 have never been through Gradle: fix the first compiler error first.

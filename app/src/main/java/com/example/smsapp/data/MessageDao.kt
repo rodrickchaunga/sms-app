@@ -25,15 +25,10 @@ interface MessageDao {
     @Query("DELETE FROM scheduled_sms WHERE id = :id AND status IN ('sent','failed','cancelled')") suspend fun deleteScheduledFinished(id: String): Int
     @Query("DELETE FROM scheduled_sms WHERE status IN ('sent','cancelled')") suspend fun clearFinishedScheduled(): Int
     @Query("SELECT * FROM conversation_prefs WHERE address = :address LIMIT 1") suspend fun conversationPrefs(address: String): ConversationPrefsEntity?
-    @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun saveConversationPrefs(prefs: ConversationPrefsEntity)
     @Query("DELETE FROM conversation_prefs WHERE address = :address") suspend fun deleteConversationPrefs(address: String)
     @Insert(onConflict = OnConflictStrategy.IGNORE) suspend fun ensureConversationPrefs(prefs: ConversationPrefsEntity)
     @Query("UPDATE conversation_prefs SET simSubscriptionId = :sub WHERE address = :address") suspend fun setConversationSimPref(address: String, sub: Int?)
     @Query("UPDATE conversation_prefs SET muted = :muted, notifSound = :sound, notifVibration = :vibration WHERE address = :address") suspend fun setConversationNotifications(address: String, muted: Boolean, sound: String?, vibration: String?)
-    @Query("SELECT COUNT(*) FROM messages") suspend fun messageCount(): Int
-    @Query("SELECT COUNT(*) FROM messages WHERE isVaulted = 1") suspend fun vaultedMessageCount(): Int
-    @Query("UPDATE scheduled_sms SET status = :status WHERE id = :id") suspend fun updateScheduledStatus(id: String, status: String)
-    @Query("DELETE FROM scheduled_sms WHERE id = :id") suspend fun deleteScheduled(id: String)
     @Query("SELECT * FROM scheduled_sms WHERE id = :id LIMIT 1") suspend fun scheduledById(id: String): ScheduledSmsEntity?
     @Query("SELECT * FROM drafts WHERE address = :address LIMIT 1") suspend fun getDraft(address: String): DraftEntity?
     @Query("DELETE FROM drafts WHERE address = :address") suspend fun deleteDraft(address: String)
@@ -48,7 +43,13 @@ interface MessageDao {
     @Query("SELECT address, body, MAX(timestamp) AS timestamp, SUM(CASE WHEN outgoing = 0 AND isRead = 0 THEN 1 ELSE 0 END) AS unread FROM messages WHERE isVaulted = 0 AND isSpam = 0 AND isArchived = 0 AND (address LIKE '%' || :query || '%' ESCAPE '\\' OR body LIKE '%' || :query || '%' ESCAPE '\\') GROUP BY address ORDER BY timestamp DESC")
     fun searchConversations(query: String): Flow<List<ConversationPreview>>
     @Query("SELECT * FROM messages WHERE isStarred = 1 AND isVaulted = 0 ORDER BY timestamp DESC") fun starred(): Flow<List<MessageEntity>>
-    @Query("SELECT address, MAX(timestamp) AS timestamp FROM messages WHERE isVaulted = 1 GROUP BY address ORDER BY timestamp DESC") fun vaultedConversations(): Flow<List<VaultPreview>>
+    /** Every number in the private space (including ones with no messages yet), newest activity first. */
+    @Query("SELECT v.address AS address, COALESCE((SELECT m.body FROM messages m WHERE m.address = v.address AND m.isVaulted = 1 ORDER BY m.timestamp DESC LIMIT 1), '') AS body, COALESCE((SELECT MAX(m.timestamp) FROM messages m WHERE m.address = v.address AND m.isVaulted = 1), v.addedAt) AS timestamp, (SELECT COUNT(*) FROM messages m WHERE m.address = v.address AND m.isVaulted = 1 AND m.outgoing = 0 AND m.isRead = 0) AS unread FROM vaulted_numbers v ORDER BY timestamp DESC")
+    fun privateConversations(): Flow<List<ConversationPreview>>
+    @Query("SELECT DISTINCT address FROM messages") suspend fun allAddresses(): List<String>
+    @Query("SELECT COUNT(*) FROM messages WHERE address = :address AND isVaulted = :vaulted") suspend fun messageCountFor(address: String, vaulted: Boolean): Int
+    @Query("UPDATE messages SET status = 'delivered', deliveredAt = :at WHERE id = :id AND status NOT LIKE 'failed%'") suspend fun markDelivered(id: Long, at: Long)
+    @Query("UPDATE conversation_prefs SET themeBackground = :background, themeOutgoing = :outgoing, themeIncoming = :incoming WHERE address = :address") suspend fun setConversationTheme(address: String, background: String?, outgoing: Int?, incoming: Int?)
     @Query("SELECT * FROM messages WHERE isSpam = 1 AND isVaulted = 0 ORDER BY timestamp DESC") fun spam(): Flow<List<MessageEntity>>
     @Query("UPDATE messages SET isVaulted = :locked WHERE address = :address") suspend fun setVaulted(address: String, locked: Boolean)
     @Query("SELECT * FROM messages WHERE address = :address") suspend fun messagesForAddress(address: String): List<MessageEntity>
@@ -70,8 +71,6 @@ interface MessageDao {
     @Query("SELECT EXISTS(SELECT 1 FROM messages WHERE address = :address AND body = :body AND timestamp = :timestamp AND outgoing = :outgoing LIMIT 1)") suspend fun duplicateMessage(address: String, body: String, timestamp: Long, outgoing: Boolean): Boolean
     @Query("SELECT * FROM messages WHERE providerId = :providerId LIMIT 1") suspend fun byProviderId(providerId: Long): MessageEntity?
     @Query("SELECT * FROM messages WHERE id = :id LIMIT 1") suspend fun byId(id: Long): MessageEntity?
-    @Query("SELECT * FROM messages ORDER BY timestamp DESC LIMIT :limit") suspend fun latest(limit: Int): List<MessageEntity>
 }
 
 data class ConversationPreview(val address: String, val body: String, val timestamp: Long, val unread: Int = 0)
-data class VaultPreview(val address: String, val timestamp: Long)

@@ -50,7 +50,7 @@ private val AccentColors = listOf(
     "Blue" to 0xFF1565C0.toInt(), "Teal" to 0xFF00796B.toInt(), "Green" to 0xFF2E7D32.toInt(), "Orange" to 0xFFE65100.toInt(),
     "Red" to 0xFFC62828.toInt(), "Purple" to 0xFF6A1B9A.toInt(), "Pink" to 0xFFAD1457.toInt(), "Slate" to 0xFF455A64.toInt()
 )
-private val BubbleColors = listOf(
+internal val BubbleColors = listOf(
     "Sky" to 0xFFBBDEFB.toInt(), "Mint" to 0xFFC8E6C9.toInt(), "Lemon" to 0xFFFFF59D.toInt(), "Rose" to 0xFFF8BBD0.toInt(),
     "Lavender" to 0xFFD1C4E9.toInt(), "Peach" to 0xFFFFCCBC.toInt(), "Grey" to 0xFFE0E0E0.toInt(),
     "Ocean" to 0xFF0277BD.toInt(), "Forest" to 0xFF2E7D32.toInt(), "Charcoal" to 0xFF37474F.toInt()

@@ -5,7 +5,7 @@ import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
-@Database(entities = [MessageEntity::class, DraftEntity::class, ScheduledSmsEntity::class, VaultedNumberEntity::class, ConversationPrefsEntity::class], version = 7, exportSchema = true)
+@Database(entities = [MessageEntity::class, DraftEntity::class, ScheduledSmsEntity::class, VaultedNumberEntity::class, ConversationPrefsEntity::class], version = 8, exportSchema = true)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun messageDao(): MessageDao
     companion object {
@@ -55,6 +55,16 @@ abstract class AppDatabase : RoomDatabase() {
                 db.execSQL("ALTER TABLE conversation_prefs ADD COLUMN muted INTEGER NOT NULL DEFAULT 0")
                 db.execSQL("ALTER TABLE conversation_prefs ADD COLUMN notifSound TEXT")
                 db.execSQL("ALTER TABLE conversation_prefs ADD COLUMN notifVibration TEXT")
+            }
+        }
+        /** Delivered/received timestamps for message info, and per-conversation chat theme. */
+        val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE messages ADD COLUMN deliveredAt INTEGER")
+                db.execSQL("ALTER TABLE messages ADD COLUMN receivedAt INTEGER")
+                db.execSQL("ALTER TABLE conversation_prefs ADD COLUMN themeBackground TEXT")
+                db.execSQL("ALTER TABLE conversation_prefs ADD COLUMN themeOutgoing INTEGER")
+                db.execSQL("ALTER TABLE conversation_prefs ADD COLUMN themeIncoming INTEGER")
             }
         }
         val MIGRATION_2_3 = object : Migration(2, 3) {

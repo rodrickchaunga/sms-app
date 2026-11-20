@@ -29,7 +29,9 @@ import com.example.smsapp.data.getContactName
  *
  * Privacy rules enforced in this file:
  *  - Private (vaulted) conversations never put sender, number or text into a notification,
- *    and never get Reply / Mark-as-read actions or an address in their tap intent.
+ *    never get Reply / Mark-as-read actions or an address in their tap intent, and use the same
+ *    channel and the same generic "New message" text as ordinary hidden notifications, so nothing
+ *    in the notification (or in the system notification settings) reveals that a private space exists.
  *  - Ordinary conversations hide their text on a secure lock screen unless the user opted in.
  */
 object NotificationHelper {
@@ -43,6 +45,7 @@ object NotificationHelper {
     private const val GROUP_KEY = "com.example.smsapp.MESSAGES"
     private const val SUMMARY_ID = 1
     private const val PRIVATE_ID = 2
+    const val PRIVATE_NOTIFICATIONS_KEY = "private_notifications"
 
     enum class VibrationPattern(val id: String, val label: String, val pattern: LongArray?) {
         DEFAULT("default", "Default", longArrayOf(0, 250, 250, 250)),
@@ -106,13 +109,6 @@ object NotificationHelper {
         return ensureChannel(context, "messages_v2_" + hash(sound, vibration), "Messages", sound, vibration, true)
     }
 
-    fun privateChannelId(context: Context): String {
-        val p = settings(context)
-        val sound = p.getString("notif_sound", SOUND_DEFAULT)
-        val vibration = p.getString("notif_vibration", VibrationPattern.DEFAULT.id)
-        return ensureChannel(context, "private_v2_" + hash(sound, vibration), "Private messages", sound, vibration, false)
-    }
-
     /** A dedicated channel only exists for conversations with a custom sound or vibration. */
     fun conversationChannelId(context: Context, address: String, displayName: String, prefs: ConversationPrefsEntity?): String? {
         if (prefs == null || (prefs.notifSound == null && prefs.notifVibration == null)) return null
@@ -126,17 +122,17 @@ object NotificationHelper {
         val manager = context.getSystemService(NotificationManager::class.java) ?: return
         manager.deleteNotificationChannel("messages_v1")
         manager.deleteNotificationChannel("private_messages_v1")
+        // Earlier builds had a separate "Private messages" channel that showed up in system settings; remove it.
+        manager.notificationChannels.filter { it.id.startsWith("private_v2_") }.forEach { manager.deleteNotificationChannel(it.id) }
         globalChannelId(context)
-        privateChannelId(context)
     }
 
     /** Call after the global sound/vibration changes: creates the new channels and removes superseded ones. */
     fun applyGlobalAlertSettings(context: Context) {
         val manager = context.getSystemService(NotificationManager::class.java) ?: return
         val keepGlobal = globalChannelId(context)
-        val keepPrivate = privateChannelId(context)
         manager.notificationChannels
-            .filter { (it.id.startsWith("messages_v2_") && it.id != keepGlobal) || (it.id.startsWith("private_v2_") && it.id != keepPrivate) }
+            .filter { it.id.startsWith("messages_v2_") && it.id != keepGlobal }
             .forEach { manager.deleteNotificationChannel(it.id) }
     }
 
@@ -177,6 +173,8 @@ object NotificationHelper {
         val app = context.applicationContext
         val manager = app.getSystemService(NotificationManager::class.java) ?: return
         val prefs = settings(app)
+        // Private messages: one setting, kept inside the private space ("generic" is the default, "off" posts nothing).
+        if (vaulted && prefs.getString(PRIVATE_NOTIFICATIONS_KEY, "generic") == "off") return
         val showOnLockScreen = prefs.getBoolean("lock_screen_previews", false)
         val privacy = prefs.getString("notification_privacy", "full") ?: "full"
 
@@ -184,12 +182,12 @@ object NotificationHelper {
         val id: Int
         if (vaulted) {
             id = PRIVATE_ID
-            val channel = privateChannelId(app)
+            val channel = globalChannelId(app)
             builder = NotificationCompat.Builder(app, channel)
-                .setContentTitle("Private message")
-                .setContentText("Open the app and authenticate to read it")
+                .setContentTitle("New message")
+                .setContentText("Open the app to read it")
                 .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
-                .setPublicVersion(genericVersion(app, channel, "Private message"))
+                .setPublicVersion(genericVersion(app, channel, "New message"))
                 .setContentIntent(openApp(app, id, null))
         } else {
             id = notificationId(address)

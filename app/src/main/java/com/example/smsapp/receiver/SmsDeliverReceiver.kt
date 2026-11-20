@@ -36,7 +36,9 @@ class SmsDeliverReceiver : BroadcastReceiver() {
                 val result = app.repo.ingest(sender, body, timestamp, providerId)
                 if (result != null && !result.blocked) {
                     if (NotificationState.isViewing(sender)) app.repo.markRead(sender)
-                    else {
+                    else if (result.vaulted && NotificationState.privateSpaceVisible) {
+                        // The private list shows the unread badge; nothing to announce.
+                    } else {
                         val convPrefs = app.db.messageDao().conversationPrefs(sender)
                         if (convPrefs?.muted != true) NotificationHelper.showIncoming(context, sender, body, timestamp, result.vaulted, convPrefs)
                     }

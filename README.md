@@ -35,7 +35,7 @@ The Room database filename remains `sms.db`. Migration 1→2 adds message metada
 
 ## Privacy
 
-Private message bodies are encrypted in the Room database. Private conversation content should not be sent to notifications or logs. Android SMS provider rows are removed when a thread is placed in the vault. Cloud backup is disabled to avoid accidental plaintext leakage. Vault protection is not forensic-grade and cannot protect a rooted or compromised device.
+Private message bodies are encrypted in the Room database. Private conversation content should not be sent to notifications or logs. The private space is opened only by long-pressing the new-conversation button. Android SMS provider rows are removed when a thread is placed in the vault. Cloud backup is disabled to avoid accidental plaintext leakage. Vault protection is not forensic-grade and cannot protect a rooted or compromised device.
 
 ## Current limitations
 

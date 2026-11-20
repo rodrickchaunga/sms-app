@@ -3,9 +3,8 @@ package com.example.smsapp.data
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
-import android.os.Build
+import android.net.Uri
 import android.provider.Telephony
-import android.telephony.SmsManager
 import android.telephony.PhoneNumberUtils
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -23,7 +22,7 @@ class SmsRepository(private val context: Context, private val dao: MessageDao) {
     fun thread(addr: String): Flow<List<MessageEntity>> = dao.thread(addr)
     fun privateThread(addr: String): Flow<List<MessageEntity>> = dao.privateThread(addr).map { rows -> rows.map { it.copy(body = runCatching { VaultCrypto.decrypt(it.body) }.getOrDefault("[Unable to decrypt private message]")) } }
     fun starred(): Flow<List<MessageEntity>> = dao.starred()
-    fun vaultedConversations(): Flow<List<VaultPreview>> = dao.vaultedConversations()
+    fun privateConversations(): Flow<List<ConversationPreview>> = dao.privateConversations().map { rows -> rows.map { it.copy(body = runCatching { VaultCrypto.decrypt(it.body) }.getOrDefault("")) } }
     fun spam(): Flow<List<MessageEntity>> = dao.spam()
     fun scheduledMessages(): Flow<List<ScheduledSmsEntity>> = dao.scheduledMessages()
 
@@ -50,16 +49,21 @@ class SmsRepository(private val context: Context, private val dao: MessageDao) {
         val storedBody = if (vaulted) VaultCrypto.encrypt(body) else body
         val localId = dao.insert(MessageEntity(address = address, body = storedBody, timestamp = now, outgoing = true, isVaulted = vaulted, status = "sending"))
         val parts = mgr.divideMessage(body)
-        fun callback(action: String, partIndex: Int, requestCode: Int): PendingIntent {
+        // One unique PendingIntent per message part (the data URI differs), so extras can never be swapped between messages.
+        // The delivery-report intent must be mutable: Android attaches the status-report PDU to it, and an immutable
+        // PendingIntent drops that PDU, which is the only way to tell "delivered" from "accepted by the carrier, still pending".
+        fun callback(action: String, partIndex: Int, mutable: Boolean): PendingIntent {
             val callbackIntent = Intent(context, com.example.smsapp.receiver.SmsStatusReceiver::class.java)
                 .setAction("${context.packageName}.$action")
+                .setData(Uri.parse("smsapp://status/$localId/$partIndex"))
                 .putExtra("message_id", localId)
                 .putExtra("part_index", partIndex)
                 .putExtra("part_count", parts.size)
-            return PendingIntent.getBroadcast(context, requestCode, callbackIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+            val flags = PendingIntent.FLAG_UPDATE_CURRENT or if (mutable) PendingIntent.FLAG_MUTABLE else PendingIntent.FLAG_IMMUTABLE
+            return PendingIntent.getBroadcast(context, 0, callbackIntent, flags)
         }
-        val sentIntents = ArrayList(parts.indices.map { callback("SMS_SENT", it, ((localId * 31 + it) and 0x7fffffff).toInt()) })
-        val deliveredIntents = if (deliveryReports) ArrayList(parts.indices.map { callback("SMS_DELIVERED", it, ((localId * 67 + it + 1) and 0x7fffffff).toInt()) }) else null
+        val sentIntents = ArrayList(parts.indices.map { callback("SMS_SENT", it, false) })
+        val deliveredIntents = if (deliveryReports) ArrayList(parts.indices.map { callback("SMS_DELIVERED", it, true) }) else null
         try {
             if (parts.size == 1) mgr.sendTextMessage(address, null, body, sentIntents.first(), deliveredIntents?.firstOrNull())
             else mgr.sendMultipartTextMessage(address, null, parts, sentIntents, deliveredIntents)
@@ -89,7 +93,7 @@ class SmsRepository(private val context: Context, private val dao: MessageDao) {
             else dao.duplicateMessage(address, body, ts, false)
         if (duplicate) return@withContext null
         val storedBody = if (vaulted) VaultCrypto.encrypt(body) else body
-        val id = dao.insert(MessageEntity(address = address, body = storedBody, timestamp = ts, outgoing = false, isVaulted = vaulted, isSpam = blocked, providerId = if (vaulted || blocked) null else providerId, status = "received", isRead = blocked))
+        val id = dao.insert(MessageEntity(address = address, body = storedBody, timestamp = ts, outgoing = false, isVaulted = vaulted, isSpam = blocked, providerId = if (vaulted || blocked) null else providerId, status = "received", isRead = blocked, receivedAt = System.currentTimeMillis()))
         if (id <= 0L) null else IngestResult(id, vaulted, blocked)
     }
 
@@ -116,9 +120,28 @@ class SmsRepository(private val context: Context, private val dao: MessageDao) {
         dao.ensureConversationPrefs(ConversationPrefsEntity(address))
         dao.setConversationNotifications(address, muted, sound, vibration)
     }
-    suspend fun storageSummary(): String = withContext(Dispatchers.IO) {
-        val bytes = listOf("sms.db", "sms.db-wal", "sms.db-shm").sumOf { name -> context.getDatabasePath(name).let { if (it.exists()) it.length() else 0L } }
-        "${dao.messageCount()} messages (${dao.vaultedMessageCount()} private) · ${"%.1f".format(bytes / 1048576.0)} MB database"
+    /** Maps a typed or contact number onto the address an existing thread is stored under, so one person never gets two threads. */
+    suspend fun resolveAddress(input: String): String = withContext(Dispatchers.IO) {
+        val typed = input.trim()
+        val matches = dao.allAddresses().filter { it == typed || runCatching { PhoneNumberUtils.compare(it, typed) }.getOrDefault(false) }
+        matches.firstOrNull { it == typed } ?: matches.firstOrNull() ?: PhoneNumberUtils.stripSeparators(typed).takeIf { it.isNotEmpty() } ?: typed
+    }
+    suspend fun saveConversationTheme(address: String, background: String?, outgoing: Int?, incoming: Int?) = withContext(Dispatchers.IO) {
+        dao.ensureConversationPrefs(ConversationPrefsEntity(address))
+        dao.setConversationTheme(address, background, outgoing, incoming)
+    }
+    suspend fun messageCount(address: String, vaulted: Boolean): Int = withContext(Dispatchers.IO) { dao.messageCountFor(address, vaulted) }
+
+    /**
+     * Puts a number in the private space and returns the address to open. Existing threads for the same number
+     * (even if stored in another format, e.g. with or without the country code) are moved too.
+     */
+    suspend fun moveToPrivate(input: String): String = withContext(Dispatchers.IO) {
+        val typed = input.trim()
+        val stored = dao.allAddresses().filter { it == typed || runCatching { PhoneNumberUtils.compare(it, typed) }.getOrDefault(false) }
+        val targets = if (stored.isEmpty()) listOf(typed) else stored
+        targets.forEach { setVaulted(it, true) }
+        targets.first()
     }
     suspend fun vaultedAmong(addresses: List<String>): Set<String> = withContext(Dispatchers.IO) { addresses.filter { isVaulted(it) }.toSet() }
 

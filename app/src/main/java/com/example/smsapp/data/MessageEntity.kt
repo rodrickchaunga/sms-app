@@ -17,5 +17,9 @@ data class MessageEntity(
     val isStarred: Boolean = false,
     val isArchived: Boolean = false,
     val isSpam: Boolean = false,
-    val isRead: Boolean = true
+    val isRead: Boolean = true,
+    /** Outgoing: when the carrier confirmed delivery to the handset. */
+    val deliveredAt: Long? = null,
+    /** Incoming: when this phone received the message (timestamp is the sender's send time). */
+    val receivedAt: Long? = null
 )

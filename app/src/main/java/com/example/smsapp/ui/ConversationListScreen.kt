@@ -1,22 +1,30 @@
 package com.example.smsapp.ui
-import androidx.compose.foundation.ExperimentalFoundationApi
+
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AddComment
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext // <-- The missing import!
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -24,32 +32,66 @@ import androidx.compose.ui.unit.sp
 import com.example.smsapp.data.SmsRepository
 import com.example.smsapp.data.getContactName
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+/** Contact name for a number, falling back to the number itself until (or unless) the lookup finds one. */
+@Composable
+fun rememberDisplayName(address: String): String {
+    val context = LocalContext.current
+    var name by remember(address) { mutableStateOf(address) }
+    LaunchedEffect(address) {
+        withContext(Dispatchers.IO) { getContactName(context, address) }?.let { name = it }
+    }
+    return name
+}
+
+/**
+ * Tap the button for a new conversation (contacts or a typed number). A long press opens the private space;
+ * the button gives no hint of it. A long press on a conversation starts bulk selection.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ConversationListScreen(
-    repo: SmsRepository, 
+    repo: SmsRepository,
     onOpen: (String) -> Unit,
-    onLongPress: (String) -> Unit = {},
+    onNewConversation: () -> Unit,
+    onPrivateSpace: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     var searchQuery by remember { mutableStateOf("") }
     var isSearching by remember { mutableStateOf(false) }
-    
+    val scope = rememberCoroutineScope()
+
     val list by if (searchQuery.isBlank()) {
         repo.conversations.collectAsState(initial = emptyList())
     } else {
         repo.search(searchQuery).collectAsState(initial = emptyList())
     }
 
-    var showDialog by remember { mutableStateOf(false) }
-    var phoneNumber by remember { mutableStateOf("") }
+    var selected by remember { mutableStateOf(setOf<String>()) }
+    var confirmDelete by remember { mutableStateOf(false) }
+    val selecting = selected.isNotEmpty()
+    BackHandler(enabled = selecting) { selected = emptySet() }
+    // Forget selected conversations that disappear from the list (deleted, or filtered out by a new search).
+    LaunchedEffect(list) {
+        if (selected.isNotEmpty()) selected = selected.intersect(list.map { it.address }.toSet())
+    }
+    fun toggle(address: String) { selected = if (address in selected) selected - address else selected + address }
 
     Scaffold(
         modifier = modifier,
         topBar = {
-            if (isSearching) {
+            if (selecting) {
+                TopAppBar(
+                    title = { Text("${selected.size} selected") },
+                    navigationIcon = { IconButton(onClick = { selected = emptySet() }) { Icon(Icons.Default.Close, "Clear selection") } },
+                    actions = {
+                        IconButton(onClick = { selected = list.map { it.address }.toSet() }) { Icon(Icons.Default.SelectAll, "Select all") }
+                        IconButton(onClick = { confirmDelete = true }) { Icon(Icons.Default.Delete, "Delete") }
+                    }
+                )
+            } else if (isSearching) {
                 TopAppBar(
                     title = {
                         TextField(
@@ -74,8 +116,21 @@ fun ConversationListScreen(
             }
         },
         floatingActionButton = {
-            FloatingActionButton(onClick = { showDialog = true }) {
-                Icon(Icons.Default.AddComment, contentDescription = "New Message")
+            if (!selecting) {
+                val haptic = LocalHapticFeedback.current
+                val shape = RoundedCornerShape(16.dp)
+                Box(
+                    Modifier.size(56.dp).shadow(6.dp, shape).clip(shape)
+                        .background(MaterialTheme.colorScheme.primaryContainer)
+                        .combinedClickable(
+                            onClickLabel = "New conversation",
+                            onClick = onNewConversation,
+                            onLongClick = { haptic.performHapticFeedback(HapticFeedbackType.LongPress); onPrivateSpace() }
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(Icons.Default.AddComment, contentDescription = "New conversation", tint = MaterialTheme.colorScheme.onPrimaryContainer)
+                }
             }
         }
     ) { pad ->
@@ -90,56 +145,51 @@ fun ConversationListScreen(
                 }
             }
             items(list, key = { it.address }) { c ->
-                ContactListItem(address = c.address, body = c.body, timestamp = c.timestamp, unread = c.unread, onClick = { onOpen(c.address) }, onLongClick = { onLongPress(c.address) })
+                ContactListItem(
+                    address = c.address, body = c.body, timestamp = c.timestamp, unread = c.unread,
+                    selected = c.address in selected,
+                    onClick = { if (selecting) toggle(c.address) else onOpen(c.address) },
+                    onLongClick = { toggle(c.address) }
+                )
                 HorizontalDivider(thickness = 0.5.dp, color = Color.LightGray.copy(alpha = 0.5f))
             }
         }
     }
 
-    if (showDialog) {
+    if (confirmDelete) {
+        val count = selected.size
         AlertDialog(
-            onDismissRequest = { showDialog = false },
-            title = { Text("New Message") },
-            text = {
-                OutlinedTextField(
-                    value = phoneNumber,
-                    onValueChange = { phoneNumber = it },
-                    label = { Text("Phone Number") },
-                    singleLine = true
-                )
-            },
+            onDismissRequest = { confirmDelete = false },
+            title = { Text(if (count == 1) "Delete conversation?" else "Delete $count conversations?") },
+            text = { Text("This removes them from this app and their SMS provider rows. This cannot be undone.") },
             confirmButton = {
                 TextButton(onClick = {
-                    if (phoneNumber.isNotBlank()) {
-                        onOpen(phoneNumber)
-                        showDialog = false
-                        phoneNumber = ""
-                    }
-                }) { Text("Start") }
+                    val targets = selected
+                    confirmDelete = false
+                    selected = emptySet()
+                    scope.launch { targets.forEach { runCatching { repo.deleteConversation(it) } } }
+                }) { Text("Delete") }
             },
-            dismissButton = { TextButton(onClick = { showDialog = false }) { Text("Cancel") } }
+            dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Cancel") } }
         )
     }
 }
 
 @Composable
-fun ContactListItem(address: String, body: String, timestamp: Long, unread: Int = 0, onClick: () -> Unit, onLongClick: () -> Unit = {}) {
-    val context = LocalContext.current
-    var displayName by remember { mutableStateOf(address) }
-
-    LaunchedEffect(address) {
-        withContext(Dispatchers.IO) {
-            val name = getContactName(context, address)
-            if (name != null) displayName = name
-        }
-    }
-
+fun ContactListItem(
+    address: String, body: String, timestamp: Long, unread: Int = 0, selected: Boolean = false,
+    onClick: () -> Unit, onLongClick: () -> Unit = {}
+) {
+    val displayName = rememberDisplayName(address)
     val colors = listOf(Color(0xFF2196F3), Color(0xFF4CAF50), Color(0xFF9C27B0), Color(0xFFFF9800), Color(0xFFF44336))
     val avatarColor = remember(displayName) { colors[Math.floorMod(displayName.hashCode(), colors.size)] }
     val initial = remember(displayName) { displayName.firstOrNull()?.uppercase() ?: "?" }
 
     Row(
-        modifier = Modifier.fillMaxWidth().combinedClickable(onClick = onClick, onLongClick = onLongClick).padding(12.dp),
+        modifier = Modifier.fillMaxWidth()
+            .background(if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.14f) else Color.Transparent)
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
+            .padding(12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Box(modifier = Modifier.width(12.dp)) {
@@ -147,18 +197,19 @@ fun ContactListItem(address: String, body: String, timestamp: Long, unread: Int 
         }
 
         Box(
-            modifier = Modifier.size(50.dp).clip(CircleShape).background(avatarColor),
+            modifier = Modifier.size(50.dp).clip(CircleShape).background(if (selected) MaterialTheme.colorScheme.primary else avatarColor),
             contentAlignment = Alignment.Center
         ) {
-            Text(initial, color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            if (selected) Icon(Icons.Default.Check, contentDescription = "Selected", tint = MaterialTheme.colorScheme.onPrimary)
+            else Text(initial, color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
         }
 
         Spacer(modifier = Modifier.width(12.dp))
 
         Column(modifier = Modifier.weight(1f)) {
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text(displayName, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                Text(java.text.DateFormat.getTimeInstance(java.text.DateFormat.SHORT).format(java.util.Date(timestamp)), fontSize = 12.sp, color = Color.Gray) 
+                Text(displayName, fontWeight = FontWeight.Bold, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                Text(java.text.DateFormat.getTimeInstance(java.text.DateFormat.SHORT).format(java.util.Date(timestamp)), fontSize = 12.sp, color = Color.Gray)
             }
             Spacer(modifier = Modifier.height(4.dp))
             Text(body, maxLines = 1, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 14.sp, fontWeight = if (unread > 0) FontWeight.Bold else FontWeight.Normal)

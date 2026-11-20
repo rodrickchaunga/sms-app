@@ -105,7 +105,7 @@ fun ConversationNotificationDialog(repo: SmsRepository, address: String, display
             else Column {
                 ListItem(headlineContent = { Text("Mute") }, supportingContent = { Text("No alerts. Messages still arrive and count as unread.") }, trailingContent = { Switch(muted, { muted = it }) })
                 if (!privateMode) NotificationAlertControls(sound, vibration, true, { sound = it }, { vibration = it })
-                else Text("Private conversations share one private notification channel, so only muting applies.", modifier = Modifier.padding(top = 8.dp))
+                else Text("Only muting applies to this conversation.", modifier = Modifier.padding(top = 8.dp))
             }
         },
         confirmButton = {

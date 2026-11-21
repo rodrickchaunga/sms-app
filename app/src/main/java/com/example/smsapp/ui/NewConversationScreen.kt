@@ -18,14 +18,14 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-suspend fun loadContacts(context: Context): List<ContactEntry> = withContext(Dispatchers.IO) {
-    val result = mutableListOf<ContactEntry>()
+suspend fun loadContacts(context: Context): List<Pair<String, String>> = withContext(Dispatchers.IO) {
+    val result = mutableListOf<Pair<String, String>>()
     val projection = arrayOf(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME, ContactsContract.CommonDataKinds.Phone.NUMBER)
     context.contentResolver.query(ContactsContract.CommonDataKinds.Phone.CONTENT_URI, projection, null, null, ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME + " COLLATE NOCASE")?.use { c ->
         val name = c.getColumnIndexOrThrow(projection[0]); val number = c.getColumnIndexOrThrow(projection[1])
-        while (c.moveToNext()) result += ContactEntry(c.getString(name).orEmpty(), c.getString(number).orEmpty())
+        while (c.moveToNext()) result += Pair(c.getString(name).orEmpty(), c.getString(number).orEmpty())
     }
-    result.distinctBy { it.number }
+    result.distinctBy { it.second }
 }
 
 /**
@@ -41,7 +41,7 @@ fun NewConversationScreen(
     onChoose: (String) -> Unit
 ) {
     val context = LocalContext.current
-    var contacts by remember { mutableStateOf<List<ContactEntry>?>(null) }
+    var contacts by remember { mutableStateOf<List<Pair<String, String>>?>(null) }
     var query by remember { mutableStateOf("") }
     LaunchedEffect(Unit) { contacts = runCatching { loadContacts(context) }.getOrDefault(emptyList()) }
     BackHandler(onBack = onBack)
@@ -64,12 +64,12 @@ fun NewConversationScreen(
                 }
                 if (all == null) item(key = "loading") { Text("Loading contacts…", modifier = Modifier.padding(24.dp), color = MaterialTheme.colorScheme.onSurfaceVariant) }
                 else {
-                    val filtered = all.filter { it.name.contains(query, true) || it.number.contains(query, true) }
+                    val filtered = all.filter { it.first.contains(query, true) || it.second.contains(query, true) }
                     if (filtered.isEmpty() && !looksLikeNumber) item(key = "empty") {
                         Text(if (query.isBlank()) "No contacts found or Contacts permission is unavailable." else "No matching contacts.", modifier = Modifier.padding(24.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
-                    items(filtered, key = { it.number }) { contact ->
-                        ListItem(headlineContent = { Text(contact.name) }, supportingContent = { Text(contact.number) }, modifier = Modifier.clickable { onChoose(contact.number) })
+                    items(filtered, key = { it.second }) { contact ->
+                        ListItem(headlineContent = { Text(contact.first) }, supportingContent = { Text(contact.second) }, modifier = Modifier.clickable { onChoose(contact.second) })
                         HorizontalDivider()
                     }
                 }

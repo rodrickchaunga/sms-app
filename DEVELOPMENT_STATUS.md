@@ -1,5 +1,20 @@
 # SMS App V2.0 — development status
 
+## Phase 3.7 (this delivery): 8 upgrades
+
+Not compiled in the authoring environment (no Android SDK): fix the first compiler error first. Room database version is now 9 (migration 8->9: `isPinned` on `conversation_prefs`).
+
+1. Unknown numbers: a banner under the chat header ("Unknown number", Add contact / Block number) when an unsaved phone number has messaged you. "Add to contacts" also sits beside Call in the contact details. Both disappear once the number is saved (re-checked when you return to the chat).
+2. Phone numbers inside messages are underlined: tap opens the dialer, long-press copies the number (no info dialog). Only number-like text counts (international, local with leading 0, grouped or plain 10 digits); codes, amounts, dates and references are left alone. Tapping anywhere else on the bubble behaves as before.
+3. A message that arrives on a SIM sets that conversation's SIM to it (dual-SIM phones only). The app-wide default SIM is untouched.
+4. Swipe actions need a deliberate pull (at least about 40% of the screen width); light touches and quick flicks do nothing.
+5. `ContactEntry` removed from `NewConversationScreen.kt` (contacts are plain name/number pairs).
+6. Unread conversations are highlighted (tinted row, bold name, coloured time, bold preview).
+7. The message box is disabled for sender names such as AIRTEL or TNM ("You can't reply to this sender"). Numeric short codes can still be replied to. The call button is hidden for them too.
+8. Pin conversations: pin/unpin from the chat menu or from bulk selection in the list. Pinned conversations stay at the top (newest first) and show a pin icon.
+
+---
+
 ## Phase 3.6 (this delivery): 12 upgrades
 
 Not compiled in the authoring environment (no Android SDK): fix the first compiler error first. No database change in this delivery.

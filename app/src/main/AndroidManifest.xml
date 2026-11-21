@@ -13,9 +13,9 @@
     <uses-permission android:name="android.permission.VIBRATE"/>
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/> 
 
-    <application
+    <application android:icon="@drawable/ic_launcher"
         android:name=".SmsApp"
-        android:icon="@drawable/ic_launcher" android:label="Messages"
+        android:label="Messages"
         android:allowBackup="false"
         android:fullBackupContent="false"
         android:dataExtractionRules="@xml/data_extraction_rules"

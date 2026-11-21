@@ -5,7 +5,7 @@ import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
-@Database(entities = [MessageEntity::class, DraftEntity::class, ScheduledSmsEntity::class, VaultedNumberEntity::class, ConversationPrefsEntity::class], version = 8, exportSchema = true)
+@Database(entities = [MessageEntity::class, DraftEntity::class, ScheduledSmsEntity::class, VaultedNumberEntity::class, ConversationPrefsEntity::class], version = 9, exportSchema = true)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun messageDao(): MessageDao
     companion object {
@@ -65,6 +65,12 @@ abstract class AppDatabase : RoomDatabase() {
                 db.execSQL("ALTER TABLE conversation_prefs ADD COLUMN themeBackground TEXT")
                 db.execSQL("ALTER TABLE conversation_prefs ADD COLUMN themeOutgoing INTEGER")
                 db.execSQL("ALTER TABLE conversation_prefs ADD COLUMN themeIncoming INTEGER")
+            }
+        }
+        /** Pinned conversations. */
+        val MIGRATION_8_9 = object : Migration(8, 9) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE conversation_prefs ADD COLUMN isPinned INTEGER NOT NULL DEFAULT 0")
             }
         }
         val MIGRATION_2_3 = object : Migration(2, 3) {

@@ -2,11 +2,14 @@ package com.example.smsapp.ui
 
 import android.content.Intent
 import android.net.Uri
+import android.provider.ContactsContract
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -45,6 +48,11 @@ import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
@@ -107,10 +115,13 @@ fun ConversationScreen(repo: SmsRepository, address: String, privateMode: Boolea
         draftLoaded = false
         draft = repo.loadDraft(address).orEmpty()
         draftLoaded = true
-        withContext(Dispatchers.IO) {
-            val name = getContactName(context, address)
-            if (name != null) headerName = name
-        }
+    }
+    // Re-checked whenever the screen comes back (e.g. after adding the number to contacts).
+    var isKnownContact by remember { mutableStateOf(true) }
+    LaunchedEffect(address, started) {
+        val name = withContext(Dispatchers.IO) { getContactName(context, address) }
+        headerName = name ?: address
+        isKnownContact = name != null
     }
 
     LaunchedEffect(address, draft, draftLoaded) {
@@ -153,7 +164,22 @@ fun ConversationScreen(repo: SmsRepository, address: String, privateMode: Boolea
     val avatarColor = remember(headerName) { colors[Math.floorMod(headerName.hashCode(), colors.size)] }
     val initial = remember(headerName) { headerName.firstOrNull()?.uppercase() ?: "?" }
 
-    val canCall = address.any { it.isDigit() }
+    val canReply = isReplyableAddress(address)
+    val canCall = canReply && address.any { it.isDigit() }
+    val isPhone = isPhoneNumber(address)
+    fun addContact() {
+        runCatching {
+            context.startActivity(Intent(ContactsContract.Intents.Insert.ACTION).apply {
+                type = ContactsContract.RawContacts.CONTENT_TYPE
+                putExtra(ContactsContract.Intents.Insert.PHONE, address)
+            })
+        }
+    }
+    fun dial(number: String) { runCatching { context.startActivity(Intent(Intent.ACTION_DIAL, Uri.fromParts("tel", dialableNumber(number), null))) } }
+    fun copyNumber(number: String) {
+        context.getSystemService(android.content.ClipboardManager::class.java)?.setPrimaryClip(android.content.ClipData.newPlainText("Phone number", dialableNumber(number)))
+        Toast.makeText(context, "Number copied", Toast.LENGTH_SHORT).show()
+    }
     val bubbleMax = (LocalConfiguration.current.screenWidthDp * 0.75f).dp
     fun retry(id: Long) {
         scope.launch {
@@ -170,8 +196,8 @@ fun ConversationScreen(repo: SmsRepository, address: String, privateMode: Boolea
 
     if (showDetails) {
         ConversationDetailsScreen(
-            repo = repo, address = address, displayName = headerName, messageCount = msgs.size, privateMode = privateMode, canCall = canCall,
-            onBack = { showDetails = false }, onCall = ::callNumber,
+            repo = repo, address = address, displayName = headerName, messageCount = msgs.size, privateMode = privateMode, canCall = canCall, canAddContact = isPhone && !isKnownContact,
+            onBack = { showDetails = false }, onCall = ::callNumber, onAddContact = ::addContact,
             onNotifications = { showNotificationSettings = true },
             onBlock = onBlock, onArchive = onArchive, onUnvault = onUnvault, onDelete = { showDeleteConfirm = true }
         )
@@ -212,6 +238,13 @@ fun ConversationScreen(repo: SmsRepository, address: String, privateMode: Boolea
                             DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
                                 DropdownMenuItem(text = { Text("Contact details") }, onClick = { menuExpanded = false; showDetails = true })
                                 DropdownMenuItem(text = { Text("Notification settings") }, onClick = { menuExpanded = false; showNotificationSettings = true })
+                                if (!privateMode) DropdownMenuItem(
+                                    text = { Text(if (convPrefs?.isPinned == true) "Unpin conversation" else "Pin conversation") },
+                                    onClick = {
+                                        menuExpanded = false
+                                        scope.launch { repo.setPinned(address, convPrefs?.isPinned != true); convPrefs = repo.conversationPrefs(address) }
+                                    }
+                                )
                                 DropdownMenuItem(text = { Text("Block number") }, onClick = { menuExpanded = false; onBlock() })
                                 DropdownMenuItem(text = { Text("Archive conversation") }, onClick = { menuExpanded = false; onArchive() })
                                 if (privateMode) DropdownMenuItem(text = { Text("Remove private lock") }, onClick = { menuExpanded = false; onUnvault() })
@@ -232,14 +265,15 @@ fun ConversationScreen(repo: SmsRepository, address: String, privateMode: Boolea
                     OutlinedTextField(
                         value = draft,
                         onValueChange = { draft = it },
+                        enabled = canReply,
                         modifier = Modifier.weight(1f),
-                        placeholder = { Text("Write a message...") },
+                        placeholder = { Text(if (canReply) "Write a message..." else "You can't reply to this sender") },
                         shape = RoundedCornerShape(24.dp),
                         keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences)
                     )
                     Spacer(Modifier.width(8.dp))
                     // Switch SIM: only on dual-SIM phones, and only until the user starts typing.
-                    if (draft.isEmpty() && sims.size > 1) TextButton(onClick = { showSimPicker = true }) { Text(simShort) }
+                    if (canReply && draft.isEmpty() && sims.size > 1) TextButton(onClick = { showSimPicker = true }) { Text(simShort) }
                     // Characters left in the current SMS and the number of SMS parts, shown near the end of a part (like Google Messages).
                     val counter: String? = if (draft.isEmpty() || !look.showCounter) null else {
                         val info = android.telephony.SmsMessage.calculateLength(draft, false)
@@ -249,7 +283,7 @@ fun ConversationScreen(repo: SmsRepository, address: String, privateMode: Boolea
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         counter?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                         IconButton(
-                            enabled = draft.isNotBlank(),
+                            enabled = canReply && draft.isNotBlank(),
                             onClick = {
                                 val body = draft
                                 draft = ""
@@ -263,6 +297,21 @@ fun ConversationScreen(repo: SmsRepository, address: String, privateMode: Boolea
             }
         ) { pad ->
             Column(Modifier.padding(pad).fillMaxSize()) {
+            if (isPhone && !isKnownContact && msgs.any { !it.outgoing }) {
+                Surface(color = MaterialTheme.colorScheme.tertiaryContainer, modifier = Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+                        Text("Unknown number", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onTertiaryContainer)
+                        Text(
+                            "This number isn't in your contacts. Be careful with links and with requests for money or codes.",
+                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onTertiaryContainer
+                        )
+                        Row {
+                            TextButton(onClick = ::addContact) { Text("Add contact") }
+                            TextButton(onClick = onBlock) { Text("Block number") }
+                        }
+                    }
+                }
+            }
             sendError?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(8.dp)) }
             Box(Modifier.weight(1f).fillMaxWidth().background(chatBackgroundColor(look))) {
             LazyColumn(
@@ -278,6 +327,12 @@ fun ConversationScreen(repo: SmsRepository, address: String, privateMode: Boolea
                     val isSelected = m.id in selectedIds
                     val failed = m.outgoing && m.status.startsWith("failed")
                     val showDetail = m.id in revealed
+                    val bubbleTap: () -> Unit = {
+                        if (selecting) toggleSelected(m.id)
+                        else revealed = if (showDetail) revealed - m.id else revealed + m.id
+                    }
+                    val bubbleLong: () -> Unit = { if (selecting) toggleSelected(m.id) else infoMessage = m }
+                    val numbers = remember(m.body) { findPhoneNumbers(m.body) }
                     Column(
                         Modifier.fillMaxWidth()
                             .background(if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.18f) else Color.Transparent)
@@ -295,20 +350,42 @@ fun ConversationScreen(repo: SmsRepository, address: String, privateMode: Boolea
                                 Spacer(modifier = Modifier.width(6.dp))
                             }
                             Surface(
-                                modifier = Modifier.widthIn(max = bubbleMax).combinedClickable(
-                                    onClick = {
-                                        if (selecting) toggleSelected(m.id)
-                                        else revealed = if (showDetail) revealed - m.id else revealed + m.id
-                                    },
-                                    onLongClick = { if (selecting) toggleSelected(m.id) else infoMessage = m }
-                                ),
+                                modifier = Modifier.widthIn(max = bubbleMax).combinedClickable(onClick = bubbleTap, onLongClick = bubbleLong),
                                 color = bubbleBg,
                                 shape = bubbleShape(look.bubbleStyle, m.outgoing)
                             ) {
-                                Text(
-                                    m.body, color = fg, fontFamily = look.messageFont.family(),
-                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = look.spacing.pad.dp)
-                                )
+                                if (numbers.isEmpty()) {
+                                    Text(
+                                        m.body, color = fg, fontFamily = look.messageFont.family(),
+                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = look.spacing.pad.dp)
+                                    )
+                                } else {
+                                    // Phone numbers in the text: tap dials, long-press copies. Anywhere else on the bubble behaves as usual.
+                                    var layout by remember(m.id) { mutableStateOf<TextLayoutResult?>(null) }
+                                    val styled = remember(m.body) {
+                                        buildAnnotatedString {
+                                            append(m.body)
+                                            numbers.forEach { addStyle(SpanStyle(textDecoration = TextDecoration.Underline, fontWeight = FontWeight.SemiBold), it.first, it.last + 1) }
+                                        }
+                                    }
+                                    Text(
+                                        styled, color = fg, fontFamily = look.messageFont.family(),
+                                        onTextLayout = { layout = it },
+                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = look.spacing.pad.dp)
+                                            .pointerInput(m.id, selecting, showDetail, numbers) {
+                                                detectTapGestures(
+                                                    onTap = { pos ->
+                                                        val hit = if (selecting) null else numberAt(layout, pos, m.body, numbers)
+                                                        if (hit != null) dial(hit) else bubbleTap()
+                                                    },
+                                                    onLongPress = { pos ->
+                                                        val hit = if (selecting) null else numberAt(layout, pos, m.body, numbers)
+                                                        if (hit != null) copyNumber(hit) else bubbleLong()
+                                                    }
+                                                )
+                                            }
+                                    )
+                                }
                             }
                             if (m.isStarred) Text(" ★", style = MaterialTheme.typography.labelSmall, color = Color(0xFFFFA000))
                         }

@@ -14,6 +14,7 @@ import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material3.*
@@ -24,7 +25,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -35,6 +38,7 @@ import com.example.smsapp.data.getContactName
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.math.abs
 
 /** Contact name for a number, falling back to the number itself until (or unless) the lookup finds one. */
 @Composable
@@ -80,6 +84,8 @@ fun ConversationListScreen(
         if (selected.isNotEmpty()) selected = selected.intersect(list.map { it.address }.toSet())
     }
     fun toggle(address: String) { selected = if (address in selected) selected - address else selected + address }
+    // A swipe has to be pulled at least this far to count, so a light touch or a quick flick does nothing.
+    val swipeMinPx = with(LocalDensity.current) { LocalConfiguration.current.screenWidthDp.dp.toPx() } * 0.4f
 
     Scaffold(
         modifier = modifier,
@@ -90,6 +96,12 @@ fun ConversationListScreen(
                     navigationIcon = { IconButton(onClick = { selected = emptySet() }) { Icon(Icons.Default.Close, "Clear selection") } },
                     actions = {
                         IconButton(onClick = { selected = list.map { it.address }.toSet() }) { Icon(Icons.Default.SelectAll, "Select all") }
+                        val allPinned = list.filter { it.address in selected }.all { it.isPinned }
+                        IconButton(onClick = {
+                            val targets = selected
+                            selected = emptySet()
+                            scope.launch { targets.forEach { runCatching { repo.setPinned(it, !allPinned) } } }
+                        }) { Icon(Icons.Default.PushPin, if (allPinned) "Unpin" else "Pin") }
                         IconButton(onClick = { confirmDelete = true }) { Icon(Icons.Default.Delete, "Delete") }
                     }
                 )
@@ -148,13 +160,20 @@ fun ConversationListScreen(
             }
             items(list, key = { it.address }) { c ->
                 // Swipe left to archive, swipe right to delete (asks first, then the row snaps back).
-                val dismissState = rememberSwipeToDismissBoxState(confirmValueChange = { value ->
-                    when (value) {
-                        SwipeToDismissBoxValue.EndToStart -> { scope.launch { repo.archive(c.address, true) }; true }
-                        SwipeToDismissBoxValue.StartToEnd -> { pendingSwipeDelete = c.address; false }
-                        else -> false
+                val stateHolder = remember { arrayOfNulls<SwipeToDismissBoxState>(1) }
+                val dismissState = rememberSwipeToDismissBoxState(
+                    positionalThreshold = { total -> total * 0.45f },
+                    confirmValueChange = { value ->
+                        val pulled = runCatching { abs(stateHolder[0]!!.requireOffset()) }.getOrDefault(0f)
+                        if (pulled < swipeMinPx) false
+                        else when (value) {
+                            SwipeToDismissBoxValue.EndToStart -> { scope.launch { repo.archive(c.address, true) }; true }
+                            SwipeToDismissBoxValue.StartToEnd -> { pendingSwipeDelete = c.address; false }
+                            else -> false
+                        }
                     }
-                })
+                )
+                stateHolder[0] = dismissState
                 SwipeToDismissBox(
                     state = dismissState,
                     enableDismissFromStartToEnd = !selecting,
@@ -173,7 +192,7 @@ fun ConversationListScreen(
                 ) {
                     Column(Modifier.background(MaterialTheme.colorScheme.background)) {
                         ContactListItem(
-                            address = c.address, body = c.body, timestamp = c.timestamp, unread = c.unread,
+                            address = c.address, body = c.body, timestamp = c.timestamp, unread = c.unread, pinned = c.isPinned,
                             selected = c.address in selected,
                             onClick = { if (selecting) toggle(c.address) else onOpen(c.address) },
                             onLongClick = { toggle(c.address) }
@@ -215,7 +234,7 @@ fun ConversationListScreen(
 
 @Composable
 fun ContactListItem(
-    address: String, body: String, timestamp: Long, unread: Int = 0, selected: Boolean = false,
+    address: String, body: String, timestamp: Long, unread: Int = 0, selected: Boolean = false, pinned: Boolean = false,
     onClick: () -> Unit, onLongClick: () -> Unit = {}
 ) {
     val displayName = rememberDisplayName(address)
@@ -225,7 +244,11 @@ fun ContactListItem(
 
     Row(
         modifier = Modifier.fillMaxWidth()
-            .background(if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.14f) else Color.Transparent)
+            .background(
+                if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)
+                else if (unread > 0) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
+                else Color.Transparent
+            )
             .combinedClickable(onClick = onClick, onLongClick = onLongClick)
             .padding(12.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -246,11 +269,17 @@ fun ContactListItem(
 
         Column(modifier = Modifier.weight(1f)) {
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text(displayName, fontWeight = FontWeight.Bold, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-                Text(java.text.DateFormat.getTimeInstance(java.text.DateFormat.SHORT).format(java.util.Date(timestamp)), fontSize = 12.sp, color = Color.Gray)
+                Text(displayName, fontWeight = if (unread > 0) FontWeight.ExtraBold else FontWeight.Medium, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                if (pinned) Icon(Icons.Default.PushPin, contentDescription = "Pinned", modifier = Modifier.size(14.dp).align(Alignment.CenterVertically), tint = Color.Gray)
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    java.text.DateFormat.getTimeInstance(java.text.DateFormat.SHORT).format(java.util.Date(timestamp)), fontSize = 12.sp,
+                    color = if (unread > 0) MaterialTheme.colorScheme.primary else Color.Gray,
+                    fontWeight = if (unread > 0) FontWeight.Bold else FontWeight.Normal
+                )
             }
             Spacer(modifier = Modifier.height(4.dp))
-            Text(body, maxLines = 1, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 14.sp, fontWeight = if (unread > 0) FontWeight.Bold else FontWeight.Normal)
+            Text(body, maxLines = 1, overflow = TextOverflow.Ellipsis, color = if (unread > 0) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 14.sp, fontWeight = if (unread > 0) FontWeight.Bold else FontWeight.Normal)
         }
     }
 }

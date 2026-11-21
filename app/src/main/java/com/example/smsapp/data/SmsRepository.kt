@@ -138,6 +138,10 @@ class SmsRepository(private val context: Context, private val dao: MessageDao) {
         val matches = dao.allAddresses().filter { it == typed || runCatching { PhoneNumberUtils.compare(it, typed) }.getOrDefault(false) }
         matches.firstOrNull { it == typed } ?: matches.firstOrNull() ?: PhoneNumberUtils.stripSeparators(typed).takeIf { it.isNotEmpty() } ?: typed
     }
+    suspend fun setPinned(address: String, pinned: Boolean) = withContext(Dispatchers.IO) {
+        dao.ensureConversationPrefs(ConversationPrefsEntity(address))
+        dao.setPinned(address, pinned)
+    }
     suspend fun saveConversationTheme(address: String, background: String?, outgoing: Int?, incoming: Int?) = withContext(Dispatchers.IO) {
         dao.ensureConversationPrefs(ConversationPrefsEntity(address))
         dao.setConversationTheme(address, background, outgoing, incoming)

@@ -8,6 +8,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Call
+import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -27,8 +28,8 @@ import kotlinx.coroutines.launch
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ConversationDetailsScreen(
-    repo: SmsRepository, address: String, displayName: String, messageCount: Int, privateMode: Boolean, canCall: Boolean,
-    onBack: () -> Unit, onCall: () -> Unit, onNotifications: () -> Unit,
+    repo: SmsRepository, address: String, displayName: String, messageCount: Int, privateMode: Boolean, canCall: Boolean, canAddContact: Boolean,
+    onBack: () -> Unit, onCall: () -> Unit, onAddContact: () -> Unit, onNotifications: () -> Unit,
     onBlock: () -> Unit, onArchive: () -> Unit, onUnvault: () -> Unit, onDelete: () -> Unit
 ) {
     val scope = rememberCoroutineScope()
@@ -52,10 +53,17 @@ fun ConversationDetailsScreen(
                 }
                 Text(displayName, style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(top = 12.dp))
                 if (displayName != address) Text(address, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                if (canCall) FilledTonalButton(onClick = onCall, modifier = Modifier.padding(top = 12.dp)) {
-                    Icon(Icons.Default.Call, contentDescription = null)
-                    Spacer(Modifier.width(8.dp))
-                    Text("Call")
+                Row(Modifier.padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (canCall) FilledTonalButton(onClick = onCall) {
+                        Icon(Icons.Default.Call, contentDescription = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Call")
+                    }
+                    if (canAddContact) FilledTonalButton(onClick = onAddContact) {
+                        Icon(Icons.Default.PersonAdd, contentDescription = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Add to contacts")
+                    }
                 }
             }
             HorizontalDivider(Modifier.padding(vertical = 16.dp))

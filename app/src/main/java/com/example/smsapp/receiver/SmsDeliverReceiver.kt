@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.Intent
 import android.provider.Telephony
 import com.example.smsapp.SmsApp
+import com.example.smsapp.data.SimManager
 import com.example.smsapp.notify.NotificationHelper
 import com.example.smsapp.notify.NotificationState
 import kotlinx.coroutines.CoroutineScope
@@ -18,6 +19,8 @@ class SmsDeliverReceiver : BroadcastReceiver() {
         val sender = messages.firstOrNull()?.originatingAddress ?: return
         val body = messages.joinToString(separator = "") { it.messageBody.orEmpty() }
         val timestamp = messages.firstOrNull()?.timestampMillis ?: System.currentTimeMillis()
+        // The SIM this message arrived on (-1 when the platform does not say).
+        val receivedOnSim = intent.getIntExtra("android.telephony.extra.SUBSCRIPTION_INDEX", intent.getIntExtra("subscription", -1))
         val pending = goAsync()
         CoroutineScope(Dispatchers.IO).launch {
             try {
@@ -35,6 +38,8 @@ class SmsDeliverReceiver : BroadcastReceiver() {
                 }
                 val result = app.repo.ingest(sender, body, timestamp, providerId)
                 if (result != null && !result.blocked) {
+                    // Replies to this conversation use the SIM it last arrived on. The app-wide default SIM is not touched.
+                    if (receivedOnSim >= 0 && SimManager.activeSims(context).size > 1) runCatching { app.repo.setConversationSim(sender, receivedOnSim) }
                     if (NotificationState.isViewing(sender)) app.repo.markRead(sender)
                     else if (result.vaulted && NotificationState.privateSpaceVisible) {
                         // The private list shows the unread badge; nothing to announce.

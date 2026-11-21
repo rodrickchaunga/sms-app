@@ -3,7 +3,7 @@ package com.example.smsapp.data
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 
-/** Per-conversation settings: SIM, mute, custom notification sound/vibration and chat theme (null = follow app-wide). */
+/** Per-conversation settings: SIM, mute, custom notification sound/vibration and chat theme (null = follow app-wide) and the pinned flag. */
 @Entity(tableName = "conversation_prefs")
 data class ConversationPrefsEntity(
     @PrimaryKey val address: String,
@@ -13,5 +13,6 @@ data class ConversationPrefsEntity(
     val notifVibration: String? = null,
     val themeBackground: String? = null,
     val themeOutgoing: Int? = null,
-    val themeIncoming: Int? = null
+    val themeIncoming: Int? = null,
+    val isPinned: Boolean = false
 )

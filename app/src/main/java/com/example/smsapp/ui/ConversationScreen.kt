@@ -64,6 +64,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.withStyle
+import androidx.compose.foundation.text.ClickableText
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -102,20 +104,6 @@ fun ConversationScreen(repo: SmsRepository, address: String, privateMode: Boolea
     // The first message that was unread when the chat was opened. Captured once, before the thread is marked read.
     var unreadAnchor by remember(address) { mutableStateOf<Long?>(null) }
     var anchorResolved by remember(address) { mutableStateOf(false) }
-    // Oldest first: [Unread line] [date header] message ... then reversed for the bottom-anchored list.
-    val rows = remember(msgs, unreadAnchor, use24h) {
-        buildList<ChatRow> {
-            var previous: MessageEntity? = null
-            for (m in msgs) {
-                if (m.id == unreadAnchor) add(UnreadRow)
-                val before = previous
-                if (before == null || ChatTime.needsSeparator(before.timestamp, m.timestamp)) add(DateRow(ChatTime.separator(m.timestamp, use24h), m.id))
-                add(MessageRow(m))
-                previous = m
-            }
-        }.asReversed()
-    }
-
     var headerName by remember { mutableStateOf(address) }
 
     // Mark read and clear the notification only while the screen is actually visible.
@@ -176,6 +164,9 @@ fun ConversationScreen(repo: SmsRepository, address: String, privateMode: Boolea
         sims = listed; convoSim = chosen; defaultSim = repo.defaultSim()
     }
     val effectiveSim = convoSim ?: defaultSim
+    val simName = sims.firstOrNull { sim -> sim.subscriptionId == effectiveSim }?.let { sim -> sim.carrier.ifBlank { sim.name } }
+        ?: sims.singleOrNull()?.let { sim -> sim.carrier.ifBlank { sim.name } }
+    val onSimClick: (() -> Unit)? = if (sims.size > 1) ({ showSimPicker = true }) else null
     val simShort = sims.firstOrNull { it.subscriptionId == effectiveSim }?.let { "SIM ${it.slotIndex + 1}" } ?: "SIM"
 
     // App-wide look, with this conversation's own theme on top of it.
@@ -196,6 +187,7 @@ fun ConversationScreen(repo: SmsRepository, address: String, privateMode: Boolea
     // "Unknown number" popup: only when the newest message is one I received from an unsaved number, and only for a few seconds.
     // Sending a message (the newest one is then mine) hides it, so it never shows because of something I typed.
     var showUnknownPopup by remember(address) { mutableStateOf(false) }
+    var showReplyHelp by remember { mutableStateOf(false) }
     val newestId = loadedMsgs?.lastOrNull()?.id
     LaunchedEffect(address, newestId, isPhone, isKnownContact) {
         val last = loadedMsgs?.lastOrNull()
@@ -204,6 +196,20 @@ fun ConversationScreen(repo: SmsRepository, address: String, privateMode: Boolea
             kotlinx.coroutines.delay(8000)
         }
         showUnknownPopup = false
+    }
+    // Oldest first: [date header] [Texting with / Sending with] [Unread line] message ... then reversed for the bottom-anchored list.
+    val rows = remember(msgs, unreadAnchor, use24h, headerName, simName, canReply) {
+        buildList<ChatRow> {
+            var previous: MessageEntity? = null
+            for (m in msgs) {
+                if (m.id == unreadAnchor) add(UnreadRow)
+                val before = previous
+                if (before == null || ChatTime.needsSeparator(before.timestamp, m.timestamp)) add(DateRow(ChatTime.separator(m.timestamp, use24h), m.id))
+                if (before == null && canReply) add(IntroRow(headerName, simName))
+                add(MessageRow(m))
+                previous = m
+            }
+        }.asReversed()
     }
     fun addContact() {
         runCatching {
@@ -230,9 +236,27 @@ fun ConversationScreen(repo: SmsRepository, address: String, privateMode: Boolea
     fun toggleSelected(id: Long) { selectedIds = if (id in selectedIds) selectedIds - id else selectedIds + id }
 
     BackHandler(enabled = showDetails) { showDetails = false }
+    BackHandler(enabled = infoMessage != null) { infoMessage = null }
     BackHandler(enabled = selecting && !showDetails) { selectedIds = emptySet() }
 
-    if (showDetails) {
+    val detailsFor = infoMessage?.let { shown -> msgs.firstOrNull { it.id == shown.id } ?: shown }
+    if (detailsFor != null) {
+        val shownSim = sims.firstOrNull { sim -> sim.subscriptionId == detailsFor.subscriptionId }?.let { sim -> sim.carrier.ifBlank { sim.name } }
+        MessageDetailsScreen(
+            message = detailsFor, address = address, simLabel = shownSim,
+            bubbleColor = bubbleColor(look, detailsFor.outgoing), bubbleShape = bubbleShape(look.bubbleStyle, detailsFor.outgoing), textFont = look.messageFont.family(),
+            onBack = { infoMessage = null },
+            onRetry = if (detailsFor.outgoing && detailsFor.status.startsWith("failed")) ({ retry(detailsFor.id); infoMessage = null }) else null,
+            onSelect = { selectedIds = setOf(detailsFor.id); infoMessage = null },
+            onCopy = {
+                context.getSystemService(android.content.ClipboardManager::class.java)?.setPrimaryClip(android.content.ClipData.newPlainText("SMS message", detailsFor.body))
+                infoMessage = null
+            },
+            onForward = { lastSelectedMessageId = detailsFor.id; forwardNumber = ""; showForwardDialog = true; infoMessage = null },
+            onStar = { scope.launch { repo.star(detailsFor.id, !detailsFor.isStarred) } },
+            onDelete = { scope.launch { repo.deleteMessage(detailsFor.id) }; infoMessage = null }
+        )
+    } else if (showDetails) {
         ConversationDetailsScreen(
             repo = repo, address = address, displayName = headerName, messageCount = msgs.size, privateMode = privateMode, canCall = canCall, canAddContact = isPhone && !isKnownContact,
             onBack = { showDetails = false }, onCall = ::callNumber, onAddContact = ::addContact,
@@ -302,10 +326,27 @@ fun ConversationScreen(repo: SmsRepository, address: String, privateMode: Boolea
                 }
             },
             bottomBar = {
-                val simName = sims.firstOrNull { sim -> sim.subscriptionId == effectiveSim }?.let { sim -> sim.carrier.ifBlank { sim.name } }
-                    ?: sims.singleOrNull()?.let { sim -> sim.carrier.ifBlank { sim.name } }
+                if (!canReply) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.surfaceContainer,
+                        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        val linkColor = MaterialTheme.colorScheme.primary
+                        val helpText = buildAnnotatedString {
+                            append("Sender can't accept replies. Contact them directly. ")
+                            pushStringAnnotation("learn", "learn")
+                            withStyle(SpanStyle(color = linkColor, textDecoration = TextDecoration.Underline)) { append("Learn more") }
+                            pop()
+                        }
+                        ClickableText(
+                            text = helpText,
+                            style = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
+                            modifier = Modifier.padding(horizontal = 24.dp, vertical = 24.dp)
+                        ) { offset -> if (helpText.getStringAnnotations("learn", offset, offset).isNotEmpty()) showReplyHelp = true }
+                    }
+                } else {
                 val hint = when {
-                    !canReply -> "You can't reply to this sender"
                     !simName.isNullOrBlank() -> "$simName • Text message"
                     else -> "Text message"
                 }
@@ -358,6 +399,7 @@ fun ConversationScreen(repo: SmsRepository, address: String, privateMode: Boolea
                         }
                     }
                 }
+                }
             }
         ) { pad ->
             Column(Modifier.padding(pad).fillMaxSize().background(MaterialTheme.colorScheme.surfaceContainer)) {
@@ -402,6 +444,7 @@ fun ConversationScreen(repo: SmsRepository, address: String, privateMode: Boolea
                   when (row) {
                     is DateRow -> DateHeader(row.text)
                     is UnreadRow -> UnreadDivider()
+                    is IntroRow -> ConversationIntro(row.name, row.simName, onSimClick)
                     is MessageRow -> {
                     val m = row.m
                     val bubbleBg = bubbleColor(look, m.outgoing)
@@ -462,6 +505,12 @@ fun ConversationScreen(repo: SmsRepository, address: String, privateMode: Boolea
                             }
                             if (m.isStarred) Text(" ★", style = MaterialTheme.typography.labelSmall, color = Color(0xFFFFA000))
                         }
+                        // Which SIM the message used, on dual-SIM phones ("• Airtel").
+                        val simTag = if (sims.size > 1) sims.firstOrNull { sim -> sim.subscriptionId == m.subscriptionId }?.let { sim -> sim.carrier.ifBlank { sim.name } } else null
+                        if (simTag != null) Text(
+                            "• $simTag", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                        )
                         // Time and status stay hidden until the message is tapped. A message that failed to send is the one exception.
                         if (showDetail || failed) {
                             val time = java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.SHORT, java.text.DateFormat.SHORT).format(java.util.Date(m.timestamp))
@@ -483,11 +532,13 @@ fun ConversationScreen(repo: SmsRepository, address: String, privateMode: Boolea
                   }
                 }
             }
-            if (loadedMsgs != null && msgs.isEmpty()) Text(
-                "This is the start of a new conversation. Say something nice!",
-                modifier = Modifier.align(Alignment.Center).padding(32.dp), textAlign = TextAlign.Center,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+            if (loadedMsgs != null && msgs.isEmpty()) Column(
+                Modifier.align(Alignment.TopCenter).padding(top = 24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                DateHeader(ChatTime.separator(System.currentTimeMillis(), use24h))
+                if (canReply) ConversationIntro(headerName, simName, onSimClick)
+            }
             if (showJump) SmallFloatingActionButton(
                 onClick = { scope.launch { listState.animateScrollToItem(0) } },
                 modifier = Modifier.align(Alignment.BottomEnd).padding(12.dp)
@@ -502,48 +553,11 @@ fun ConversationScreen(repo: SmsRepository, address: String, privateMode: Boolea
         onSelect = { choice -> scope.launch { repo.setConversationSim(address, choice) }; convoSim = choice; showSimPicker = false },
         onDismiss = { showSimPicker = false }
     )
-    infoMessage?.let { m ->
-        val format = java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.MEDIUM, java.text.DateFormat.MEDIUM)
-        val lines = buildList {
-            if (m.outgoing) {
-                add("To" to address)
-                add("Status" to statusLabel(m.status))
-                add("Sent" to format.format(java.util.Date(m.timestamp)))
-                if (m.status == "delivered") add("Delivered" to (m.deliveredAt?.let { format.format(java.util.Date(it)) } ?: "Time not recorded"))
-            } else {
-                add("From" to address)
-                add("Sent" to format.format(java.util.Date(m.timestamp)))
-                m.receivedAt?.let { add("Received" to format.format(java.util.Date(it))) }
-            }
-        }
-        AlertDialog(
-            onDismissRequest = { infoMessage = null },
-            title = { Text("Message info") },
-            text = {
-                Column {
-                    lines.forEach { (label, value) ->
-                        Row(Modifier.padding(vertical = 2.dp)) {
-                            Text("$label: ", fontWeight = FontWeight.Bold)
-                            Text(value)
-                        }
-                    }
-                    Spacer(Modifier.height(8.dp))
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        if (m.outgoing && m.status.startsWith("failed")) TextButton(onClick = { retry(m.id); infoMessage = null }) { Text("Retry") }
-                        TextButton(onClick = { selectedIds = setOf(m.id); infoMessage = null }) { Text("Select") }
-                        TextButton(onClick = {
-                            context.getSystemService(android.content.ClipboardManager::class.java)?.setPrimaryClip(android.content.ClipData.newPlainText("SMS message", m.body))
-                            infoMessage = null
-                        }) { Text("Copy") }
-                        TextButton(onClick = { lastSelectedMessageId = m.id; forwardNumber = ""; showForwardDialog = true; infoMessage = null }) { Text("Forward") }
-                        TextButton(onClick = { scope.launch { repo.star(m.id, !m.isStarred) }; infoMessage = null }) { Text(if (m.isStarred) "Unstar" else "Star") }
-                        TextButton(onClick = { scope.launch { repo.deleteMessage(m.id) }; infoMessage = null }) { Text("Delete") }
-                    }
-                }
-            },
-            confirmButton = { TextButton(onClick = { infoMessage = null }) { Text("Close") } }
-        )
-    }
+    if (showReplyHelp) AlertDialog(
+        onDismissRequest = { showReplyHelp = false },
+        text = { Text("Short codes are local or personalized numbers for sending international SMS messages.\n\nYou can reply to numbers-only short codes, but not to codes with letters and numbers, like “MSG007.”") },
+        confirmButton = { TextButton(onClick = { showReplyHelp = false }) { Text("OK") } }
+    )
     if (showDeleteSelected) AlertDialog(
         onDismissRequest = { showDeleteSelected = false },
         title = { Text(if (selectedIds.size == 1) "Delete message?" else "Delete ${selectedIds.size} messages?") },
@@ -579,7 +593,7 @@ fun ConversationScreen(repo: SmsRepository, address: String, privateMode: Boolea
     )
 }
 
-private fun statusLabel(status: String): String = when {
+internal fun statusLabel(status: String): String = when {
     status == "sending" -> "Sending"
     status == "sent" || status == "synced" -> "Sent"
     status == "delivered" -> "Delivered"
@@ -596,13 +610,32 @@ private sealed interface ChatRow { val key: String }
 private data class MessageRow(val m: MessageEntity) : ChatRow { override val key: String get() = "m${m.id}" }
 private data class DateRow(val text: String, val id: Long) : ChatRow { override val key: String get() = "d$id" }
 private object UnreadRow : ChatRow { override val key: String = "unread" }
+private data class IntroRow(val name: String, val simName: String?) : ChatRow { override val key: String get() = "intro" }
 
 @Composable
 private fun DateHeader(text: String) {
     Text(
         text, modifier = Modifier.fillMaxWidth().padding(vertical = 10.dp), textAlign = TextAlign.Center,
-        style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant
+        style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant
     )
+}
+
+/** "Texting with Mula Jose (SMS/MMS)" and "Sending with Airtel" (the SIM is a link that opens the SIM picker on dual-SIM phones). */
+@Composable
+private fun ConversationIntro(name: String, simName: String?, onSimClick: (() -> Unit)?) {
+    Column(Modifier.fillMaxWidth().padding(vertical = 8.dp, horizontal = 16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        Text("Texting with $name (SMS/MMS)", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
+        if (!simName.isNullOrBlank()) {
+            Spacer(Modifier.height(14.dp))
+            Row {
+                Text("Sending with ", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(
+                    simName, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary, textDecoration = TextDecoration.Underline,
+                    modifier = if (onSimClick != null) Modifier.clickable(onClick = onSimClick) else Modifier
+                )
+            }
+        }
+    }
 }
 
 @Composable

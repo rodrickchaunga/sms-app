@@ -50,6 +50,9 @@ interface MessageDao {
     @Query("SELECT v.address AS address, COALESCE((SELECT m.body FROM messages m WHERE m.address = v.address AND m.isVaulted = 1 ORDER BY m.timestamp DESC LIMIT 1), '') AS body, COALESCE((SELECT m.outgoing FROM messages m WHERE m.address = v.address AND m.isVaulted = 1 ORDER BY m.timestamp DESC LIMIT 1), 0) AS lastOutgoing, COALESCE((SELECT MAX(m.timestamp) FROM messages m WHERE m.address = v.address AND m.isVaulted = 1), v.addedAt) AS timestamp, (SELECT COUNT(*) FROM messages m WHERE m.address = v.address AND m.isVaulted = 1 AND m.outgoing = 0 AND m.isRead = 0) AS unread, 0 AS isPinned FROM vaulted_numbers v ORDER BY timestamp DESC")
     fun privateConversations(): Flow<List<ConversationPreview>>
     @Query("SELECT DISTINCT address FROM messages") suspend fun allAddresses(): List<String>
+    @Query("SELECT address FROM vaulted_numbers") suspend fun vaultedNumberAddresses(): List<String>
+    @Query("SELECT DISTINCT address FROM messages WHERE isVaulted = 1") suspend fun vaultedMessageAddresses(): List<String>
+    @Query("UPDATE messages SET address = :to WHERE address = :from AND isVaulted = 1") suspend fun reassignVaultedAddress(from: String, to: String): Int
     @Query("SELECT COUNT(*) FROM messages WHERE address = :address AND isVaulted = :vaulted") suspend fun messageCountFor(address: String, vaulted: Boolean): Int
     @Query("UPDATE messages SET status = 'delivered', deliveredAt = :at WHERE id = :id AND status NOT LIKE 'failed%'") suspend fun markDelivered(id: Long, at: Long)
     @Query("UPDATE conversation_prefs SET isPinned = :pinned WHERE address = :address") suspend fun setPinned(address: String, pinned: Boolean)

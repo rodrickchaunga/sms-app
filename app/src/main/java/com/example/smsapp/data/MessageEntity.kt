@@ -21,5 +21,7 @@ data class MessageEntity(
     /** Outgoing: when the carrier confirmed delivery to the handset. */
     val deliveredAt: Long? = null,
     /** Incoming: when this phone received the message (timestamp is the sender's send time). */
-    val receivedAt: Long? = null
+    val receivedAt: Long? = null,
+    /** The SIM this message arrived on or was sent from (null when unknown, e.g. older messages). */
+    val subscriptionId: Int? = null
 )

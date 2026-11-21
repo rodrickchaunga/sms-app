@@ -5,7 +5,7 @@ import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
-@Database(entities = [MessageEntity::class, DraftEntity::class, ScheduledSmsEntity::class, VaultedNumberEntity::class, ConversationPrefsEntity::class], version = 9, exportSchema = true)
+@Database(entities = [MessageEntity::class, DraftEntity::class, ScheduledSmsEntity::class, VaultedNumberEntity::class, ConversationPrefsEntity::class], version = 10, exportSchema = true)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun messageDao(): MessageDao
     companion object {
@@ -71,6 +71,12 @@ abstract class AppDatabase : RoomDatabase() {
         val MIGRATION_8_9 = object : Migration(8, 9) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE conversation_prefs ADD COLUMN isPinned INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+        /** Which SIM each message used (shown as "• Airtel" under messages on dual-SIM phones). */
+        val MIGRATION_9_10 = object : Migration(9, 10) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE messages ADD COLUMN subscriptionId INTEGER")
             }
         }
         val MIGRATION_2_3 = object : Migration(2, 3) {

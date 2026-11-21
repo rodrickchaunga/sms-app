@@ -1,5 +1,18 @@
 # SMS App V2.0 — development status
 
+## Phase 3.9 (this delivery): details screen, sender notice, SIM labels, private-number fix
+
+Not compiled in the authoring environment (no Android SDK): fix the first compiler error first. Room database version is now 10 (migration 9->10: `subscriptionId` on `messages`).
+
+1. Long-press a message opens a Details screen: the message, Status (Received/Sent, or Sent/Delivered for your own messages; Status/Time for failed ones), Type, From/To, SIM, and the message actions (Retry, Select, Copy text, Forward, Star, Delete).
+2. Senders you cannot reply to (names such as MPAMBA or TNM Promos) replace the message box with "Sender can't accept replies. Contact them directly. Learn more"; Learn more opens the short-code explanation with OK.
+3. Top of a chat (and a brand-new chat): "Texting with <name> (SMS/MMS)" and "Sending with <carrier>"; on dual-SIM phones the carrier is a link that opens the SIM picker. The old "start of a new conversation" text is gone.
+4. Each message records the SIM it arrived on or was sent from and shows "• Airtel" under it on dual-SIM phones. Older messages have no label.
+5. Date headers: `Yesterday • ...`, weekday for the last week, `Friday, 6 Nov • 9:26 pm` after that.
+6. Private numbers saved as 099... or 088...: a message that arrives as +265... is now stored under the saved address, so it shows in that private chat. Opening the private space also moves earlier messages that were stored under the +265... spelling onto the saved number.
+
+---
+
 ## Phase 3.8 (this delivery): Google Messages look + 3 requested changes
 
 Not compiled in the authoring environment (no Android SDK): fix the first compiler error first. No database change (version unchanged).

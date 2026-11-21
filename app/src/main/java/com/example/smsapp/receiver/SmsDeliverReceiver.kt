@@ -36,16 +36,17 @@ class SmsDeliverReceiver : BroadcastReceiver() {
                     }
                     context.contentResolver.insert(Telephony.Sms.Inbox.CONTENT_URI, values)?.lastPathSegment?.toLongOrNull()
                 }
-                val result = app.repo.ingest(sender, body, timestamp, providerId)
+                val result = app.repo.ingest(sender, body, timestamp, providerId, receivedOnSim.takeIf { it >= 0 })
                 if (result != null && !result.blocked) {
+                    val thread = result.address
                     // Replies to this conversation use the SIM it last arrived on. The app-wide default SIM is not touched.
-                    if (receivedOnSim >= 0 && SimManager.activeSims(context).size > 1) runCatching { app.repo.setConversationSim(sender, receivedOnSim) }
-                    if (NotificationState.isViewing(sender)) app.repo.markRead(sender)
+                    if (receivedOnSim >= 0 && SimManager.activeSims(context).size > 1) runCatching { app.repo.setConversationSim(thread, receivedOnSim) }
+                    if (NotificationState.isViewing(thread)) app.repo.markRead(thread)
                     else if (result.vaulted && NotificationState.privateSpaceVisible) {
                         // The private list shows the unread badge; nothing to announce.
                     } else {
-                        val convPrefs = app.db.messageDao().conversationPrefs(sender)
-                        if (convPrefs?.muted != true) NotificationHelper.showIncoming(context, sender, body, timestamp, result.vaulted, convPrefs)
+                        val convPrefs = app.db.messageDao().conversationPrefs(thread)
+                        if (convPrefs?.muted != true) NotificationHelper.showIncoming(context, thread, body, timestamp, result.vaulted, convPrefs)
                     }
                 }
             } catch (_: SecurityException) {

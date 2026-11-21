@@ -32,6 +32,19 @@ object ChatTime {
         return "${DateTimeFormatter.ofPattern(pattern, Locale.getDefault()).format(date)}, ${clock(ts, use24h)}"
     }
 
+    /** Message details: "Today, 7:08 am", "Yesterday, 7:08 am", "6 Nov, 9:26 pm" (year added for older years). */
+    fun detail(ts: Long, use24h: Boolean): String {
+        val date = dateOf(ts)
+        val today = LocalDate.now(zone)
+        val time = clock(ts, use24h)
+        return when {
+            date == today -> "Today, $time"
+            date == today.minusDays(1) -> "Yesterday, $time"
+            date.year == today.year -> "${DateTimeFormatter.ofPattern("d MMM", Locale.getDefault()).format(date)}, $time"
+            else -> "${DateTimeFormatter.ofPattern("d MMM yyyy", Locale.getDefault()).format(date)}, $time"
+        }
+    }
+
     /** Header inside a conversation: "11:36 am" today, "Yesterday • 7:32 am", "Monday • 7:32 am", "12 Nov • 7:32 am". */
     fun separator(ts: Long, use24h: Boolean): String {
         val date = dateOf(ts)
@@ -42,8 +55,8 @@ object ChatTime {
             days == 0L -> time
             days == 1L -> "Yesterday • $time"
             days in 2L..6L -> "${date.dayOfWeek.getDisplayName(TextStyle.FULL, Locale.getDefault())} • $time"
-            date.year == today.year -> "${DateTimeFormatter.ofPattern("d MMM", Locale.getDefault()).format(date)} • $time"
-            else -> "${DateTimeFormatter.ofPattern("d MMM yyyy", Locale.getDefault()).format(date)} • $time"
+            date.year == today.year -> "${DateTimeFormatter.ofPattern("EEEE, d MMM", Locale.getDefault()).format(date)} • $time"
+            else -> "${DateTimeFormatter.ofPattern("EEEE, d MMM yyyy", Locale.getDefault()).format(date)} • $time"
         }
     }
 }

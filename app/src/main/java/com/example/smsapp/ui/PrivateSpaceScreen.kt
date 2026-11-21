@@ -99,6 +99,7 @@ fun PrivateSpaceScreen(repo: SmsRepository, security: VaultSecurity, onOpen: (St
     var notifyMode by remember { mutableStateOf(prefs.getString(NotificationHelper.PRIVATE_NOTIFICATIONS_KEY, "generic") ?: "generic") }
 
     BackHandler { if (selecting) selected = emptySet() else onExit() }
+    LaunchedEffect(Unit) { runCatching { repo.repairPrivateAddresses() } }
     LaunchedEffect(convos) { if (selected.isNotEmpty()) selected = selected.intersect(convos.map { it.address }.toSet()) }
     fun toggle(address: String) { selected = if (address in selected) selected - address else selected + address }
 

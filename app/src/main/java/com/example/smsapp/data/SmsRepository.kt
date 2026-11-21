@@ -13,7 +13,8 @@ import kotlinx.coroutines.withContext
 import com.example.smsapp.security.VaultCrypto
 import com.example.smsapp.notify.NotificationHelper
 
-data class IngestResult(val id: Long, val vaulted: Boolean, val blocked: Boolean)
+/** [address] is the thread the message was stored under (for a private number this is the address it was saved with). */
+data class IngestResult(val id: Long, val vaulted: Boolean, val blocked: Boolean, val address: String)
 
 class SmsRepository(private val context: Context, private val dao: MessageDao) {
     val conversations: Flow<List<ConversationPreview>> = dao.conversations()
@@ -58,7 +59,7 @@ class SmsRepository(private val context: Context, private val dao: MessageDao) {
             check(dao.resetForRetry(retryId, now) == 1) { "This message can no longer be retried" }
             localId = retryId
         } else {
-            localId = dao.insert(MessageEntity(address = address, body = storedBody, timestamp = now, outgoing = true, isVaulted = vaulted, status = "sending"))
+            localId = dao.insert(MessageEntity(address = address, body = storedBody, timestamp = now, outgoing = true, isVaulted = vaulted, status = "sending", subscriptionId = sub))
         }
         val parts = mgr.divideMessage(body)
         // One unique PendingIntent per message part (the data URI differs), so extras can never be swapped between messages.
@@ -96,17 +97,37 @@ class SmsRepository(private val context: Context, private val dao: MessageDao) {
     }
 
     /** Returns null when the message was a duplicate, so callers never notify twice for one SMS. */
-    suspend fun ingest(address: String, body: String, ts: Long, providerId: Long? = null): IngestResult? = withContext(Dispatchers.IO) {
+    suspend fun ingest(address: String, body: String, ts: Long, providerId: Long? = null, subscriptionId: Int? = null): IngestResult? = withContext(Dispatchers.IO) {
         if (providerId != null && dao.byProviderId(providerId) != null) return@withContext null
         val vaulted = isVaulted(address)
+        // A private number saved as 099... / 088... keeps its thread when the carrier delivers it as +265..., so the message shows in that chat.
+        val thread = if (vaulted) vaultedThreadAddress(address) else address
         val blocked = isBlocked(address)
         // Vault bodies are AES-GCM with a random IV, so ciphertext never matches; compare decrypted text instead.
-        val duplicate = if (vaulted) dao.messagesAt(address, ts, false).any { runCatching { VaultCrypto.decrypt(it.body) }.getOrNull() == body }
+        val duplicate = if (vaulted) dao.messagesAt(thread, ts, false).any { runCatching { VaultCrypto.decrypt(it.body) }.getOrNull() == body }
             else dao.duplicateMessage(address, body, ts, false)
         if (duplicate) return@withContext null
         val storedBody = if (vaulted) VaultCrypto.encrypt(body) else body
-        val id = dao.insert(MessageEntity(address = address, body = storedBody, timestamp = ts, outgoing = false, isVaulted = vaulted, isSpam = blocked, providerId = if (vaulted || blocked) null else providerId, status = "received", isRead = blocked, receivedAt = System.currentTimeMillis()))
-        if (id <= 0L) null else IngestResult(id, vaulted, blocked)
+        val id = dao.insert(MessageEntity(address = thread, body = storedBody, timestamp = ts, outgoing = false, isVaulted = vaulted, isSpam = blocked, providerId = if (vaulted || blocked) null else providerId, status = "received", isRead = blocked, receivedAt = System.currentTimeMillis(), subscriptionId = subscriptionId))
+        if (id <= 0L) null else IngestResult(id, vaulted, blocked, thread)
+    }
+
+    /** The address a private number was saved under, matching +265... against 099... style spellings of the same number. */
+    private suspend fun vaultedThreadAddress(address: String): String {
+        val saved = dao.vaultedNumberAddresses()
+        return saved.firstOrNull { it == address } ?: matchingAddress(address, saved) ?: address
+    }
+
+    /**
+     * Moves private messages that were stored under another spelling of a private number (e.g. +26599... for a number
+     * saved as 099...) onto the saved address, so earlier messages that never showed up appear in the chat.
+     */
+    suspend fun repairPrivateAddresses() = withContext(Dispatchers.IO) {
+        val saved = dao.vaultedNumberAddresses()
+        if (saved.isEmpty()) return@withContext
+        dao.vaultedMessageAddresses().filter { it !in saved }.forEach { stray ->
+            matchingAddress(stray, saved)?.let { target -> dao.reassignVaultedAddress(stray, target) }
+        }
     }
 
     /** Marks a thread read in Room and, where this app owns the rows, in the system SMS provider. */

@@ -1,5 +1,7 @@
 package com.example.smsapp.ui
 
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -95,7 +97,7 @@ private fun ChatPreview(s: AppearanceSettings) {
 /** Every control here is persisted in DataStore and applied app-wide by SmsTheme / the conversation screen. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun PersonalizeScreen(modifier: Modifier = Modifier) {
+fun PersonalizeScreen(modifier: Modifier = Modifier, onBack: (() -> Unit)? = null) {
     val context = LocalContext.current
     val store = remember { (context.applicationContext as SmsApp).appearance }
     val settings by store.flow.collectAsState(initial = LocalAppearance.current)
@@ -104,7 +106,7 @@ fun PersonalizeScreen(modifier: Modifier = Modifier) {
     var scale by remember(settings.fontScale) { mutableStateOf(settings.fontScale) }
 
     Scaffold(modifier = modifier, topBar = {
-        TopAppBar(title = { Text("Personalize") }, actions = { TextButton(onClick = { scope.launch { store.reset() } }) { Text("Reset") } })
+        TopAppBar(colors = smsTopBarColors(), title = { Text("Personalize") }, navigationIcon = { onBack?.let { back -> androidx.compose.material3.IconButton(onClick = back) { androidx.compose.material3.Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") } } }, actions = { TextButton(onClick = { scope.launch { store.reset() } }) { Text("Reset") } })
     }) { padding ->
         Column(Modifier.padding(padding).padding(horizontal = 16.dp).verticalScroll(rememberScrollState())) {
             ChatPreview(settings)

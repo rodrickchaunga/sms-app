@@ -1,5 +1,22 @@
 # SMS App V2.0 — development status
 
+## Phase 3.8 (this delivery): Google Messages look + 3 requested changes
+
+Not compiled in the authoring environment (no Android SDK): fix the first compiler error first. No database change (version unchanged).
+
+1. List preview: when the newest message in a conversation is mine the preview reads `You: <text>`; a received message shows just its text (`ConversationPreview.lastOutgoing`, selected in the four conversation queries).
+2. Unknown-number popup: slides in under the header only when the newest message is one I received from an unsaved number, and hides itself after 8 seconds (or on X / Add contact / Block). Sending a message hides it, so typing and sending never triggers it.
+3. `PrivateSpaceScreen.kt`: top-level `ListItemDefaults.colors(...)` value replaced by `@Composable getTransparentColors()` (the sed fix you supplied).
+4. Dates: list rows show `21/11, 4:01 pm` (year added for older years); chats get date headers (`11:36 am` today, `Yesterday • ...`, `Monday • ...`, `12 Nov • ...`) on a new day or after a 1 hour gap (`ChatTime.SEPARATOR_GAP_MS`), and an `Unread` line above the first message that was unread when the chat was opened.
+5. List screen: lifted top bar with rounded content sheet, round avatars (letter for saved contacts, person icon for everyone else), unread count badge under the time, no divider lines, `Start chat` button (long-press still opens the private space), overflow menu: Mark all as read, Archived, Spam and blocked, Personalize, Settings. The bottom tab bar is gone; Personalize and Settings open from the menu with a back arrow.
+6. Chat screen: avatar in the header, no avatar beside bubbles, pill message box with `<carrier> • Text message` hint, round send button.
+7. Theme: default accent is peach with warm tinted dark/light surfaces and rounded bubbles. Anyone who already chose an accent or bubble style keeps it.
+8. New `SpamScreen.kt` (list of blocked numbers with Unblock). `Mark all as read` leaves private-space conversations untouched.
+
+Not included: Bin and Help and feedback (no recycle bin or help screen exists yet), per-message SIM label under the last message (needs a new column), emoji/image/voice buttons in the message box (no feature behind them).
+
+---
+
 ## Phase 3.7 (this delivery): 8 upgrades
 
 Not compiled in the authoring environment (no Android SDK): fix the first compiler error first. Room database version is now 9 (migration 8->9: `isPinned` on `conversation_prefs`).

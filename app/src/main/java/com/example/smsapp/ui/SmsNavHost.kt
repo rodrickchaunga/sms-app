@@ -3,17 +3,10 @@ package com.example.smsapp.ui
 import android.view.WindowManager
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
-import androidx.compose.foundation.layout.padding
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Email
-import androidx.compose.material.icons.filled.Palette
-import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -43,9 +36,11 @@ fun SmsNavHost(repo: SmsRepository, launch: LaunchRequest?) {
     var inPrivateSpace by remember { mutableStateOf(false) }
     var showNewConversation by remember { mutableStateOf(false) }
     var showArchived by remember { mutableStateOf(false) }
+    var showSpam by remember { mutableStateOf(false) }
+    var showSettings by remember { mutableStateOf(false) }
+    var showPersonalize by remember { mutableStateOf(false) }
     var showUnlock by remember { mutableStateOf(false) }
     var showPinSetup by remember { mutableStateOf(false) }
-    var selectedTab by rememberSaveable { mutableIntStateOf(0) }
     var pinEntry by remember { mutableStateOf("") }
     var pinError by remember { mutableStateOf<String?>(null) }
 
@@ -172,19 +167,18 @@ fun SmsNavHost(repo: SmsRepository, launch: LaunchRequest?) {
         PrivateSpaceScreen(repo, security,
             onOpen = { address -> currentAddress = address; isPrivateSession = true },
             onExit = { inPrivateSpace = false })
+    } else if (showSpam) {
+        SpamScreen(repo, onBack = { showSpam = false })
+    } else if (showPersonalize) {
+        BackHandler { showPersonalize = false }
+        PersonalizeScreen(onBack = { showPersonalize = false })
+    } else if (showSettings) {
+        BackHandler { showSettings = false }
+        SettingsScreen(repo = repo, onOpenConversation = ::openAddress, onOpenPersonalize = { showPersonalize = true }, onOpenArchived = { showArchived = true }, onBack = { showSettings = false })
     } else {
-        Scaffold(bottomBar = {
-            NavigationBar {
-                NavigationBarItem(selected = selectedTab == 0, onClick = { selectedTab = 0 }, icon = { Icon(Icons.Default.Email, "Messages") }, label = { Text("Messages") })
-                NavigationBarItem(selected = selectedTab == 1, onClick = { selectedTab = 1 }, icon = { Icon(Icons.Default.Palette, "Personalize") }, label = { Text("Personalize") })
-                NavigationBarItem(selected = selectedTab == 2, onClick = { selectedTab = 2 }, icon = { Icon(Icons.Default.Settings, "Settings") }, label = { Text("Settings") })
-            }
-        }) { padding ->
-            when (selectedTab) {
-                0 -> ConversationListScreen(repo, onOpen = ::openAddress, onNewConversation = { showNewConversation = true }, onPrivateSpace = ::requestPrivateSpace, modifier = Modifier.padding(padding))
-                1 -> PersonalizeScreen(Modifier.padding(padding))
-                else -> SettingsScreen(repo = repo, onOpenConversation = ::openAddress, onOpenPersonalize = { selectedTab = 1 }, onOpenArchived = { showArchived = true }, modifier = Modifier.padding(padding))
-            }
-        }
+        ConversationListScreen(
+            repo, onOpen = ::openAddress, onNewConversation = { showNewConversation = true }, onPrivateSpace = ::requestPrivateSpace,
+            onArchived = { showArchived = true }, onSpam = { showSpam = true }, onPersonalize = { showPersonalize = true }, onSettings = { showSettings = true }
+        )
     }
 }

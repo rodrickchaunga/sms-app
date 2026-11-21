@@ -38,16 +38,16 @@ interface MessageDao {
     fun thread(addr: String): Flow<List<MessageEntity>>
     @Query("SELECT * FROM messages WHERE address = :addr AND isVaulted = 1 ORDER BY timestamp ASC")
     fun privateThread(addr: String): Flow<List<MessageEntity>>
-    @Query("SELECT m.address AS address, m.body AS body, MAX(m.timestamp) AS timestamp, SUM(CASE WHEN m.outgoing = 0 AND m.isRead = 0 THEN 1 ELSE 0 END) AS unread, COALESCE(p.isPinned, 0) AS isPinned FROM messages m LEFT JOIN conversation_prefs p ON p.address = m.address WHERE m.isVaulted = 0 AND m.isSpam = 0 AND m.isArchived = 0 GROUP BY m.address ORDER BY isPinned DESC, timestamp DESC")
+    @Query("SELECT m.address AS address, m.body AS body, m.outgoing AS lastOutgoing, MAX(m.timestamp) AS timestamp, SUM(CASE WHEN m.outgoing = 0 AND m.isRead = 0 THEN 1 ELSE 0 END) AS unread, COALESCE(p.isPinned, 0) AS isPinned FROM messages m LEFT JOIN conversation_prefs p ON p.address = m.address WHERE m.isVaulted = 0 AND m.isSpam = 0 AND m.isArchived = 0 GROUP BY m.address ORDER BY isPinned DESC, timestamp DESC")
     fun conversations(): Flow<List<ConversationPreview>>
-    @Query("SELECT address, body, MAX(timestamp) AS timestamp, SUM(CASE WHEN outgoing = 0 AND isRead = 0 THEN 1 ELSE 0 END) AS unread, 0 AS isPinned FROM messages WHERE isVaulted = 0 AND isSpam = 0 AND isArchived = 0 AND (address LIKE '%' || :query || '%' ESCAPE '\\' OR body LIKE '%' || :query || '%' ESCAPE '\\') GROUP BY address ORDER BY timestamp DESC")
+    @Query("SELECT address, body, outgoing AS lastOutgoing, MAX(timestamp) AS timestamp, SUM(CASE WHEN outgoing = 0 AND isRead = 0 THEN 1 ELSE 0 END) AS unread, 0 AS isPinned FROM messages WHERE isVaulted = 0 AND isSpam = 0 AND isArchived = 0 AND (address LIKE '%' || :query || '%' ESCAPE '\\' OR body LIKE '%' || :query || '%' ESCAPE '\\') GROUP BY address ORDER BY timestamp DESC")
     fun searchConversations(query: String): Flow<List<ConversationPreview>>
-    @Query("SELECT address, body, MAX(timestamp) AS timestamp, 0 AS unread, 0 AS isPinned FROM messages WHERE isVaulted = 0 AND isSpam = 0 AND isArchived = 1 GROUP BY address ORDER BY timestamp DESC")
+    @Query("SELECT address, body, outgoing AS lastOutgoing, MAX(timestamp) AS timestamp, 0 AS unread, 0 AS isPinned FROM messages WHERE isVaulted = 0 AND isSpam = 0 AND isArchived = 1 GROUP BY address ORDER BY timestamp DESC")
     fun archivedConversations(): Flow<List<ConversationPreview>>
     @Query("UPDATE messages SET status = 'sending', timestamp = :now, deliveredAt = NULL, providerId = NULL WHERE id = :id AND outgoing = 1 AND status LIKE 'failed%'") suspend fun resetForRetry(id: Long, now: Long): Int
     @Query("SELECT * FROM messages WHERE isStarred = 1 AND isVaulted = 0 ORDER BY timestamp DESC") fun starred(): Flow<List<MessageEntity>>
     /** Every number in the private space (including ones with no messages yet), newest activity first. */
-    @Query("SELECT v.address AS address, COALESCE((SELECT m.body FROM messages m WHERE m.address = v.address AND m.isVaulted = 1 ORDER BY m.timestamp DESC LIMIT 1), '') AS body, COALESCE((SELECT MAX(m.timestamp) FROM messages m WHERE m.address = v.address AND m.isVaulted = 1), v.addedAt) AS timestamp, (SELECT COUNT(*) FROM messages m WHERE m.address = v.address AND m.isVaulted = 1 AND m.outgoing = 0 AND m.isRead = 0) AS unread, 0 AS isPinned FROM vaulted_numbers v ORDER BY timestamp DESC")
+    @Query("SELECT v.address AS address, COALESCE((SELECT m.body FROM messages m WHERE m.address = v.address AND m.isVaulted = 1 ORDER BY m.timestamp DESC LIMIT 1), '') AS body, COALESCE((SELECT m.outgoing FROM messages m WHERE m.address = v.address AND m.isVaulted = 1 ORDER BY m.timestamp DESC LIMIT 1), 0) AS lastOutgoing, COALESCE((SELECT MAX(m.timestamp) FROM messages m WHERE m.address = v.address AND m.isVaulted = 1), v.addedAt) AS timestamp, (SELECT COUNT(*) FROM messages m WHERE m.address = v.address AND m.isVaulted = 1 AND m.outgoing = 0 AND m.isRead = 0) AS unread, 0 AS isPinned FROM vaulted_numbers v ORDER BY timestamp DESC")
     fun privateConversations(): Flow<List<ConversationPreview>>
     @Query("SELECT DISTINCT address FROM messages") suspend fun allAddresses(): List<String>
     @Query("SELECT COUNT(*) FROM messages WHERE address = :address AND isVaulted = :vaulted") suspend fun messageCountFor(address: String, vaulted: Boolean): Int
@@ -68,6 +68,10 @@ interface MessageDao {
     @Query("DELETE FROM vaulted_numbers WHERE address = :address") suspend fun removeVaultedNumber(address: String)
     @Query("SELECT providerId FROM messages WHERE address = :address AND isRead = 0 AND outgoing = 0 AND isVaulted = 0 AND providerId IS NOT NULL") suspend fun unreadProviderIds(address: String): List<Long>
     @Query("UPDATE messages SET isRead = 1 WHERE address = :address AND isRead = 0") suspend fun markThreadRead(address: String): Int
+    /** Mark all as read: ordinary conversations only. Private-space threads are never touched from the main list. */
+    @Query("SELECT providerId FROM messages WHERE isRead = 0 AND outgoing = 0 AND isVaulted = 0 AND providerId IS NOT NULL") suspend fun allUnreadProviderIds(): List<Long>
+    @Query("SELECT DISTINCT address FROM messages WHERE isRead = 0 AND outgoing = 0 AND isVaulted = 0") suspend fun unreadAddresses(): List<String>
+    @Query("UPDATE messages SET isRead = 1 WHERE isRead = 0 AND isVaulted = 0") suspend fun markAllRead(): Int
     @Query("SELECT * FROM messages WHERE address = :address AND timestamp = :timestamp AND outgoing = :outgoing") suspend fun messagesAt(address: String, timestamp: Long, outgoing: Boolean): List<MessageEntity>
     @Query("SELECT DISTINCT address FROM messages WHERE isSpam = 1") suspend fun blockedAddresses(): List<String>
     @Query("SELECT EXISTS(SELECT 1 FROM vaulted_numbers WHERE address = :address) OR EXISTS(SELECT 1 FROM messages WHERE address = :address AND isVaulted = 1)") suspend fun isVaultedExact(address: String): Boolean
@@ -77,4 +81,5 @@ interface MessageDao {
     @Query("SELECT * FROM messages WHERE id = :id LIMIT 1") suspend fun byId(id: Long): MessageEntity?
 }
 
-data class ConversationPreview(val address: String, val body: String, val timestamp: Long, val unread: Int = 0, val isPinned: Boolean = false)
+/** [lastOutgoing] is true when the newest message in the conversation was sent by this user (the list shows "You: ..."). */
+data class ConversationPreview(val address: String, val body: String, val timestamp: Long, val unread: Int = 0, val isPinned: Boolean = false, val lastOutgoing: Boolean = false)

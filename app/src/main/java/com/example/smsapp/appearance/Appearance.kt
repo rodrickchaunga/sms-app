@@ -62,10 +62,10 @@ enum class ChatBackground(val label: String, private val light: Long?, private v
 
 data class AppearanceSettings(
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
-    val accentArgb: Int = 0xFF1565C0.toInt(),
+    val accentArgb: Int = 0xFFFFB78F.toInt(),
     val outgoingBubbleArgb: Int? = null,
     val incomingBubbleArgb: Int? = null,
-    val bubbleStyle: BubbleStyle = BubbleStyle.CLASSIC,
+    val bubbleStyle: BubbleStyle = BubbleStyle.ROUNDED,
     val background: ChatBackground = ChatBackground.NONE,
     val fontScale: Float = 1f,
     val messageFont: MessageFont = MessageFont.DEFAULT,
@@ -159,11 +159,18 @@ fun adjustForContrast(color: Color, background: Color, minRatio: Float): Color {
 
 fun buildColorScheme(accent: Color, dark: Boolean): ColorScheme {
     val base = if (dark) darkColorScheme() else lightColorScheme()
-    val primary = adjustForContrast(accent, base.background, 3f)
-    val container = lerp(primary, base.surface, if (dark) 0.65f else 0.8f)
+    // Neutrals are tinted by the accent (warm browns for peach), so bars, bubbles and sheets share one palette.
+    val background = if (dark) lerp(Color.Black, accent, 0.10f) else lerp(Color.White, accent, 0.05f)
+    val variant = if (dark) lerp(background, Color.White, 0.13f) else lerp(background, Color.Black, 0.07f)
+    val bar = if (dark) lerp(background, Color.White, 0.10f) else lerp(background, Color.Black, 0.04f)
+    val primary = adjustForContrast(accent, background, 3f)
+    val container = lerp(primary, background, if (dark) 0.65f else 0.8f)
     return base.copy(
         primary = primary, onPrimary = contrastingText(primary),
-        primaryContainer = container, onPrimaryContainer = contrastingText(container)
+        primaryContainer = container, onPrimaryContainer = contrastingText(container),
+        background = background, surface = background,
+        surfaceVariant = variant, surfaceContainer = bar, surfaceContainerHigh = variant,
+        surfaceContainerHighest = lerp(variant, if (dark) Color.White else Color.Black, 0.05f)
     )
 }
 
@@ -192,7 +199,7 @@ fun bubbleShape(style: BubbleStyle, outgoing: Boolean): Shape = when (style) {
 @Composable
 fun bubbleColor(s: AppearanceSettings, outgoing: Boolean): Color =
     (if (outgoing) s.outgoingBubbleArgb else s.incomingBubbleArgb)?.let { Color(it) }
-        ?: if (outgoing) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant
+        ?: if (outgoing) (if (LocalIsDark.current) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.primaryContainer) else MaterialTheme.colorScheme.surfaceVariant
 
 @Composable
 fun chatBackgroundColor(s: AppearanceSettings): Color =

@@ -9,7 +9,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AddComment
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.outlined.ChatBubbleOutline
 import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
@@ -22,6 +23,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -62,8 +64,13 @@ fun ConversationListScreen(
     onOpen: (String) -> Unit,
     onNewConversation: () -> Unit,
     onPrivateSpace: () -> Unit,
+    onArchived: () -> Unit = {},
+    onSpam: () -> Unit = {},
+    onPersonalize: () -> Unit = {},
+    onSettings: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
+    var menuOpen by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
     var isSearching by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
@@ -89,9 +96,11 @@ fun ConversationListScreen(
 
     Scaffold(
         modifier = modifier,
+        containerColor = MaterialTheme.colorScheme.surfaceContainer,
         topBar = {
             if (selecting) {
                 TopAppBar(
+                    colors = smsTopBarColors(),
                     title = { Text("${selected.size} selected") },
                     navigationIcon = { IconButton(onClick = { selected = emptySet() }) { Icon(Icons.Default.Close, "Clear selection") } },
                     actions = {
@@ -107,6 +116,7 @@ fun ConversationListScreen(
                 )
             } else if (isSearching) {
                 TopAppBar(
+                    colors = smsTopBarColors(),
                     title = {
                         TextField(
                             value = searchQuery,
@@ -122,9 +132,20 @@ fun ConversationListScreen(
                 )
             } else {
                 TopAppBar(
-                    title = { Text("Messages", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary) },
+                    colors = smsTopBarColors(),
+                    title = { Text("Messages", fontSize = 22.sp, color = MaterialTheme.colorScheme.onSurface) },
                     actions = {
                         IconButton(onClick = { isSearching = true }) { Icon(Icons.Default.Search, "Search") }
+                        Box {
+                            IconButton(onClick = { menuOpen = true }) { Icon(Icons.Default.MoreVert, "More options") }
+                            DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                                DropdownMenuItem(text = { Text("Mark all as read") }, onClick = { menuOpen = false; scope.launch { runCatching { repo.markAllRead() } } })
+                                DropdownMenuItem(text = { Text("Archived") }, onClick = { menuOpen = false; onArchived() })
+                                DropdownMenuItem(text = { Text("Spam and blocked") }, onClick = { menuOpen = false; onSpam() })
+                                DropdownMenuItem(text = { Text("Personalize") }, onClick = { menuOpen = false; onPersonalize() })
+                                DropdownMenuItem(text = { Text("Settings") }, onClick = { menuOpen = false; onSettings() })
+                            }
+                        }
                     }
                 )
             }
@@ -132,27 +153,30 @@ fun ConversationListScreen(
         floatingActionButton = {
             if (!selecting) {
                 val haptic = LocalHapticFeedback.current
-                val shape = RoundedCornerShape(16.dp)
-                Box(
-                    Modifier.size(56.dp).shadow(6.dp, shape).clip(shape)
+                val shape = RoundedCornerShape(20.dp)
+                Row(
+                    Modifier.height(56.dp).shadow(6.dp, shape).clip(shape)
                         .background(MaterialTheme.colorScheme.primaryContainer)
                         .combinedClickable(
                             onClickLabel = "New conversation",
                             onClick = onNewConversation,
                             onLongClick = { haptic.performHapticFeedback(HapticFeedbackType.LongPress); onPrivateSpace() }
-                        ),
-                    contentAlignment = Alignment.Center
+                        )
+                        .padding(horizontal = 20.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(Icons.Default.AddComment, contentDescription = "New conversation", tint = MaterialTheme.colorScheme.onPrimaryContainer)
+                    Icon(Icons.Outlined.ChatBubbleOutline, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimaryContainer)
+                    Spacer(Modifier.width(12.dp))
+                    Text("Start chat", color = MaterialTheme.colorScheme.onPrimaryContainer, fontWeight = FontWeight.Medium, fontSize = 16.sp)
                 }
             }
         }
     ) { pad ->
-        LazyColumn(Modifier.padding(pad)) {
+        LazyColumn(Modifier.padding(pad).fillMaxSize().roundedTop().background(MaterialTheme.colorScheme.background)) {
             if (list.isEmpty()) {
                 item {
                     Text(
-                        if (searchQuery.isBlank()) "No messages yet. Start a conversation with the + button." else "No matching messages.",
+                        if (searchQuery.isBlank()) "No messages yet. Tap Start chat to begin." else "No matching messages.",
                         modifier = Modifier.fillMaxWidth().padding(24.dp),
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -192,12 +216,11 @@ fun ConversationListScreen(
                 ) {
                     Column(Modifier.background(MaterialTheme.colorScheme.background)) {
                         ContactListItem(
-                            address = c.address, body = c.body, timestamp = c.timestamp, unread = c.unread, pinned = c.isPinned,
+                            address = c.address, body = c.body, timestamp = c.timestamp, unread = c.unread, pinned = c.isPinned, lastOutgoing = c.lastOutgoing,
                             selected = c.address in selected,
                             onClick = { if (selecting) toggle(c.address) else onOpen(c.address) },
                             onLongClick = { toggle(c.address) }
                         )
-                        HorizontalDivider(thickness = 0.5.dp, color = Color.LightGray.copy(alpha = 0.5f))
                     }
                 }
             }
@@ -235,51 +258,60 @@ fun ConversationListScreen(
 @Composable
 fun ContactListItem(
     address: String, body: String, timestamp: Long, unread: Int = 0, selected: Boolean = false, pinned: Boolean = false,
-    onClick: () -> Unit, onLongClick: () -> Unit = {}
+    lastOutgoing: Boolean = false, onClick: () -> Unit, onLongClick: () -> Unit = {}
 ) {
     val displayName = rememberDisplayName(address)
-    val colors = listOf(Color(0xFF2196F3), Color(0xFF4CAF50), Color(0xFF9C27B0), Color(0xFFFF9800), Color(0xFFF44336))
-    val avatarColor = remember(displayName) { colors[Math.floorMod(displayName.hashCode(), colors.size)] }
-    val initial = remember(displayName) { displayName.firstOrNull()?.uppercase() ?: "?" }
+    val isContact = displayName != address
+    val use24h = android.text.format.DateFormat.is24HourFormat(LocalContext.current)
+    val stamp = remember(timestamp, use24h) { ChatTime.listStamp(timestamp, use24h) }
+    // Last message sent by me: "You: Hi". A received message shows just its text.
+    val preview = if (lastOutgoing && body.isNotBlank()) "You: $body" else body
 
     Row(
         modifier = Modifier.fillMaxWidth()
-            .background(
-                if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)
-                else if (unread > 0) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
-                else Color.Transparent
-            )
+            .background(if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.14f) else Color.Transparent)
             .combinedClickable(onClick = onClick, onLongClick = onLongClick)
-            .padding(12.dp),
+            .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Box(modifier = Modifier.width(12.dp)) {
-            if (unread > 0) Box(Modifier.size(8.dp).background(MaterialTheme.colorScheme.primary, CircleShape))
-        }
-
-        Box(
-            modifier = Modifier.size(50.dp).clip(CircleShape).background(if (selected) MaterialTheme.colorScheme.primary else avatarColor),
-            contentAlignment = Alignment.Center
-        ) {
-            if (selected) Icon(Icons.Default.Check, contentDescription = "Selected", tint = MaterialTheme.colorScheme.onPrimary)
-            else Text(initial, color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
-        }
-
-        Spacer(modifier = Modifier.width(12.dp))
+        ContactAvatar(name = displayName, isContact = isContact, size = 48.dp, selected = selected)
+        Spacer(modifier = Modifier.width(16.dp))
 
         Column(modifier = Modifier.weight(1f)) {
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text(displayName, fontWeight = if (unread > 0) FontWeight.ExtraBold else FontWeight.Medium, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-                if (pinned) Icon(Icons.Default.PushPin, contentDescription = "Pinned", modifier = Modifier.size(14.dp).align(Alignment.CenterVertically), tint = Color.Gray)
-                Spacer(Modifier.width(6.dp))
+            Text(
+                displayName, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 16.sp,
+                fontWeight = if (unread > 0) FontWeight.Bold else FontWeight.Medium
+            )
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+                preview, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 14.sp,
+                color = if (unread > 0) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
+                fontWeight = if (unread > 0) FontWeight.Bold else FontWeight.Normal
+            )
+        }
+
+        Spacer(modifier = Modifier.width(8.dp))
+        Column(horizontalAlignment = Alignment.End) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (pinned) {
+                    Icon(Icons.Default.PushPin, contentDescription = "Pinned", modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(Modifier.width(4.dp))
+                }
                 Text(
-                    java.text.DateFormat.getTimeInstance(java.text.DateFormat.SHORT).format(java.util.Date(timestamp)), fontSize = 12.sp,
-                    color = if (unread > 0) MaterialTheme.colorScheme.primary else Color.Gray,
+                    stamp, fontSize = 12.sp,
+                    color = if (unread > 0) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
                     fontWeight = if (unread > 0) FontWeight.Bold else FontWeight.Normal
                 )
             }
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(body, maxLines = 1, overflow = TextOverflow.Ellipsis, color = if (unread > 0) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 14.sp, fontWeight = if (unread > 0) FontWeight.Bold else FontWeight.Normal)
+            if (unread > 0) {
+                Spacer(Modifier.height(6.dp))
+                Box(
+                    Modifier.defaultMinSize(minWidth = 22.dp, minHeight = 22.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primary).padding(horizontal = 5.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(if (unread > 99) "99+" else unread.toString(), color = MaterialTheme.colorScheme.onPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+                }
+            }
         }
     }
 }

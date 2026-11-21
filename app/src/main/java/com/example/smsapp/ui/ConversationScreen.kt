@@ -5,6 +5,11 @@ import android.net.Uri
 import android.provider.ContactsContract
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -18,7 +23,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AttachFile
+import androidx.compose.material.icons.filled.AddCircleOutline
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
@@ -59,6 +64,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.smsapp.data.SmsRepository
@@ -92,6 +98,24 @@ fun ConversationScreen(repo: SmsRepository, address: String, privateMode: Boolea
     var convPrefs by remember { mutableStateOf<ConversationPrefsEntity?>(null) }
     val selecting = selectedIds.isNotEmpty()
 
+    val use24h = android.text.format.DateFormat.is24HourFormat(context)
+    // The first message that was unread when the chat was opened. Captured once, before the thread is marked read.
+    var unreadAnchor by remember(address) { mutableStateOf<Long?>(null) }
+    var anchorResolved by remember(address) { mutableStateOf(false) }
+    // Oldest first: [Unread line] [date header] message ... then reversed for the bottom-anchored list.
+    val rows = remember(msgs, unreadAnchor, use24h) {
+        buildList<ChatRow> {
+            var previous: MessageEntity? = null
+            for (m in msgs) {
+                if (m.id == unreadAnchor) add(UnreadRow)
+                val before = previous
+                if (before == null || ChatTime.needsSeparator(before.timestamp, m.timestamp)) add(DateRow(ChatTime.separator(m.timestamp, use24h), m.id))
+                add(MessageRow(m))
+                previous = m
+            }
+        }.asReversed()
+    }
+
     var headerName by remember { mutableStateOf(address) }
 
     // Mark read and clear the notification only while the screen is actually visible.
@@ -104,8 +128,13 @@ fun ConversationScreen(repo: SmsRepository, address: String, privateMode: Boolea
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
-    LaunchedEffect(address, msgs.size, started) {
-        if (started) {
+    LaunchedEffect(address, msgs.size, started, loadedMsgs != null) {
+        val loaded = loadedMsgs
+        if (started && loaded != null) {
+            if (!anchorResolved) {
+                anchorResolved = true
+                unreadAnchor = loaded.firstOrNull { !it.outgoing && !it.isRead }?.id
+            }
             runCatching { repo.markRead(address) }
             if (privateMode) NotificationHelper.cancelPrivate(context) else NotificationHelper.cancel(context, address)
         }
@@ -160,13 +189,22 @@ fun ConversationScreen(repo: SmsRepository, address: String, privateMode: Boolea
         )
     }
     var showNotificationSettings by remember { mutableStateOf(false) }
-    val colors = listOf(Color(0xFF2196F3), Color(0xFF4CAF50), Color(0xFF9C27B0), Color(0xFFFF9800), Color(0xFFF44336))
-    val avatarColor = remember(headerName) { colors[Math.floorMod(headerName.hashCode(), colors.size)] }
-    val initial = remember(headerName) { headerName.firstOrNull()?.uppercase() ?: "?" }
 
     val canReply = isReplyableAddress(address)
     val canCall = canReply && address.any { it.isDigit() }
     val isPhone = isPhoneNumber(address)
+    // "Unknown number" popup: only when the newest message is one I received from an unsaved number, and only for a few seconds.
+    // Sending a message (the newest one is then mine) hides it, so it never shows because of something I typed.
+    var showUnknownPopup by remember(address) { mutableStateOf(false) }
+    val newestId = loadedMsgs?.lastOrNull()?.id
+    LaunchedEffect(address, newestId, isPhone, isKnownContact) {
+        val last = loadedMsgs?.lastOrNull()
+        if (last != null && !last.outgoing && isPhone && !isKnownContact) {
+            showUnknownPopup = true
+            kotlinx.coroutines.delay(8000)
+        }
+        showUnknownPopup = false
+    }
     fun addContact() {
         runCatching {
             context.startActivity(Intent(ContactsContract.Intents.Insert.ACTION).apply {
@@ -211,9 +249,11 @@ fun ConversationScreen(repo: SmsRepository, address: String, privateMode: Boolea
         }
         Scaffold(
             modifier = Modifier.imePadding(),
+            containerColor = chatBackgroundColor(look),
             topBar = {
                 if (selecting) {
                     TopAppBar(
+                        colors = smsTopBarColors(),
                         title = { Text("${selectedIds.size} selected") },
                         navigationIcon = { IconButton(onClick = { selectedIds = emptySet() }) { Icon(Icons.Default.Close, "Clear selection") } },
                         actions = {
@@ -228,7 +268,14 @@ fun ConversationScreen(repo: SmsRepository, address: String, privateMode: Boolea
                     )
                 } else {
                     TopAppBar(
-                        title = { Text(headerName, fontWeight = FontWeight.Bold, modifier = Modifier.fillMaxWidth().clickable { showDetails = true }) },
+                        colors = smsTopBarColors(),
+                        title = {
+                            Row(Modifier.fillMaxWidth().clickable { showDetails = true }, verticalAlignment = Alignment.CenterVertically) {
+                                ContactAvatar(name = headerName, isContact = headerName != address, size = 40.dp)
+                                Spacer(Modifier.width(12.dp))
+                                Text(headerName, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
+                        },
                         navigationIcon = {
                             IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
                         },
@@ -255,20 +302,36 @@ fun ConversationScreen(repo: SmsRepository, address: String, privateMode: Boolea
                 }
             },
             bottomBar = {
+                val simName = sims.firstOrNull { sim -> sim.subscriptionId == effectiveSim }?.let { sim -> sim.carrier.ifBlank { sim.name } }
+                    ?: sims.singleOrNull()?.let { sim -> sim.carrier.ifBlank { sim.name } }
+                val hint = when {
+                    !canReply -> "You can't reply to this sender"
+                    !simName.isNullOrBlank() -> "$simName • Text message"
+                    else -> "Text message"
+                }
                 Row(
-                    Modifier.fillMaxWidth().padding(8.dp),
+                    Modifier.fillMaxWidth().background(chatBackgroundColor(look)).padding(horizontal = 8.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     IconButton(onClick = {}, enabled = false) {
-                        Icon(Icons.Default.AttachFile, contentDescription = "MMS attachments not yet available")
+                        Icon(Icons.Default.AddCircleOutline, contentDescription = "MMS attachments not yet available")
                     }
-                    OutlinedTextField(
+                    TextField(
                         value = draft,
                         onValueChange = { draft = it },
                         enabled = canReply,
                         modifier = Modifier.weight(1f),
-                        placeholder = { Text(if (canReply) "Write a message..." else "You can't reply to this sender") },
-                        shape = RoundedCornerShape(24.dp),
+                        placeholder = { Text(hint, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                        shape = RoundedCornerShape(26.dp),
+                        maxLines = 5,
+                        colors = TextFieldDefaults.colors(
+                            focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                            disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                            focusedIndicatorColor = Color.Transparent,
+                            unfocusedIndicatorColor = Color.Transparent,
+                            disabledIndicatorColor = Color.Transparent
+                        ),
                         keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences)
                     )
                     Spacer(Modifier.width(8.dp))
@@ -282,38 +345,52 @@ fun ConversationScreen(repo: SmsRepository, address: String, privateMode: Boolea
                     }
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         counter?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                        IconButton(
+                        FilledIconButton(
                             enabled = canReply && draft.isNotBlank(),
+                            colors = IconButtonDefaults.filledIconButtonColors(containerColor = MaterialTheme.colorScheme.primary, contentColor = MaterialTheme.colorScheme.onPrimary),
                             onClick = {
                                 val body = draft
                                 draft = ""
                                 scope.launch { runCatching { repo.send(address, body, deliveryReports); repo.saveDraft(address, "") }.onFailure { sendError = it.message ?: "Unable to send SMS"; draft = body } }
                             }
                         ) {
-                            Icon(Icons.Default.Send, contentDescription = "Send", tint = MaterialTheme.colorScheme.primary)
+                            Icon(Icons.Default.Send, contentDescription = "Send")
                         }
                     }
                 }
             }
         ) { pad ->
-            Column(Modifier.padding(pad).fillMaxSize()) {
-            if (isPhone && !isKnownContact && msgs.any { !it.outgoing }) {
-                Surface(color = MaterialTheme.colorScheme.tertiaryContainer, modifier = Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
-                        Text("Unknown number", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onTertiaryContainer)
-                        Text(
-                            "This number isn't in your contacts. Be careful with links and with requests for money or codes.",
-                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onTertiaryContainer
-                        )
-                        Row {
-                            TextButton(onClick = ::addContact) { Text("Add contact") }
-                            TextButton(onClick = onBlock) { Text("Block number") }
+            Column(Modifier.padding(pad).fillMaxSize().background(MaterialTheme.colorScheme.surfaceContainer)) {
+            AnimatedVisibility(
+                visible = showUnknownPopup,
+                enter = slideInVertically { -it } + fadeIn(),
+                exit = slideOutVertically { -it } + fadeOut()
+            ) {
+                Surface(
+                    color = MaterialTheme.colorScheme.tertiaryContainer,
+                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp)
+                ) {
+                    Row(Modifier.padding(start = 16.dp, top = 8.dp, bottom = 4.dp, end = 4.dp), verticalAlignment = Alignment.Top) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Unknown number", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onTertiaryContainer)
+                            Text(
+                                "This number isn't in your contacts. Be careful with links and with requests for money or codes.",
+                                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onTertiaryContainer
+                            )
+                            Row {
+                                TextButton(onClick = { showUnknownPopup = false; addContact() }) { Text("Add contact") }
+                                TextButton(onClick = { showUnknownPopup = false; onBlock() }) { Text("Block number") }
+                            }
+                        }
+                        IconButton(onClick = { showUnknownPopup = false }) {
+                            Icon(Icons.Default.Close, contentDescription = "Dismiss", tint = MaterialTheme.colorScheme.onTertiaryContainer)
                         }
                     }
                 }
             }
             sendError?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(8.dp)) }
-            Box(Modifier.weight(1f).fillMaxWidth().background(chatBackgroundColor(look))) {
+            Box(Modifier.weight(1f).fillMaxWidth().roundedTop().background(chatBackgroundColor(look))) {
             LazyColumn(
                 Modifier.fillMaxSize(),
                 state = listState,
@@ -321,7 +398,12 @@ fun ConversationScreen(repo: SmsRepository, address: String, privateMode: Boolea
                 verticalArrangement = Arrangement.spacedBy(look.spacing.gap.dp),
                 contentPadding = PaddingValues(8.dp)
             ) {
-                items(msgs.asReversed(), key = { it.id }) { m ->
+                items(rows, key = { it.key }) { row ->
+                  when (row) {
+                    is DateRow -> DateHeader(row.text)
+                    is UnreadRow -> UnreadDivider()
+                    is MessageRow -> {
+                    val m = row.m
                     val bubbleBg = bubbleColor(look, m.outgoing)
                     val fg = contrastingText(bubbleBg)
                     val isSelected = m.id in selectedIds
@@ -340,15 +422,6 @@ fun ConversationScreen(repo: SmsRepository, address: String, privateMode: Boolea
                         horizontalAlignment = if (m.outgoing) Alignment.End else Alignment.Start
                     ) {
                         Row(verticalAlignment = Alignment.Bottom) {
-                            if (!m.outgoing) {
-                                Box(
-                                    modifier = Modifier.size(28.dp).clip(CircleShape).background(avatarColor),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text(initial, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                                }
-                                Spacer(modifier = Modifier.width(6.dp))
-                            }
                             Surface(
                                 modifier = Modifier.widthIn(max = bubbleMax).combinedClickable(onClick = bubbleTap, onLongClick = bubbleLong),
                                 color = bubbleBg,
@@ -392,7 +465,7 @@ fun ConversationScreen(repo: SmsRepository, address: String, privateMode: Boolea
                         // Time and status stay hidden until the message is tapped. A message that failed to send is the one exception.
                         if (showDetail || failed) {
                             val time = java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.SHORT, java.text.DateFormat.SHORT).format(java.util.Date(m.timestamp))
-                            Row(Modifier.padding(start = if (m.outgoing) 0.dp else 34.dp, top = 2.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Row(Modifier.padding(start = if (m.outgoing) 0.dp else 4.dp, top = 2.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Text(
                                     if (showDetail) (if (m.outgoing) "$time · ${statusLabel(m.status)}" else time) else "Not sent",
                                     style = MaterialTheme.typography.labelSmall,
@@ -406,6 +479,8 @@ fun ConversationScreen(repo: SmsRepository, address: String, privateMode: Boolea
                             }
                         }
                     }
+                    }
+                  }
                 }
             }
             if (loadedMsgs != null && msgs.isEmpty()) Text(
@@ -515,3 +590,26 @@ private fun statusLabel(status: String): String = when {
 }
 
 private fun contextPrefs(context: android.content.Context) = context.getSharedPreferences("sms_settings", android.content.Context.MODE_PRIVATE)
+
+
+private sealed interface ChatRow { val key: String }
+private data class MessageRow(val m: MessageEntity) : ChatRow { override val key: String get() = "m${m.id}" }
+private data class DateRow(val text: String, val id: Long) : ChatRow { override val key: String get() = "d$id" }
+private object UnreadRow : ChatRow { override val key: String = "unread" }
+
+@Composable
+private fun DateHeader(text: String) {
+    Text(
+        text, modifier = Modifier.fillMaxWidth().padding(vertical = 10.dp), textAlign = TextAlign.Center,
+        style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
+}
+
+@Composable
+private fun UnreadDivider() {
+    Row(Modifier.fillMaxWidth().padding(vertical = 8.dp, horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        HorizontalDivider(Modifier.weight(1f), color = MaterialTheme.colorScheme.primary)
+        Text("Unread", modifier = Modifier.padding(horizontal = 10.dp), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+        HorizontalDivider(Modifier.weight(1f), color = MaterialTheme.colorScheme.primary)
+    }
+}

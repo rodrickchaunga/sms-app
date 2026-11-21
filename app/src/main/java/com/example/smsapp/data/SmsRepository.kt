@@ -118,6 +118,19 @@ class SmsRepository(private val context: Context, private val dao: MessageDao) {
             providerIds.forEach { id -> context.contentResolver.update(android.content.ContentUris.withAppendedId(Telephony.Sms.CONTENT_URI, id), values, null, null) }
         }
     }
+    /** Marks every ordinary (non-private) conversation read, in Room and in the system SMS provider, and clears their notifications. */
+    suspend fun markAllRead(): Int = withContext(Dispatchers.IO) {
+        val providerIds = dao.allUnreadProviderIds()
+        val addresses = dao.unreadAddresses()
+        val changed = dao.markAllRead()
+        if (changed == 0) return@withContext 0
+        if (providerIds.isNotEmpty()) runCatching {
+            val values = android.content.ContentValues().apply { put(Telephony.Sms.READ, 1) }
+            providerIds.forEach { id -> context.contentResolver.update(android.content.ContentUris.withAppendedId(Telephony.Sms.CONTENT_URI, id), values, null, null) }
+        }
+        addresses.forEach { runCatching { NotificationHelper.cancel(context, it) } }
+        changed
+    }
     // ---- SIM preferences -------------------------------------------------------------------
     private val settings get() = context.getSharedPreferences("sms_settings", Context.MODE_PRIVATE)
     fun defaultSim(): Int? = if (settings.contains("default_sim_sub_id")) settings.getInt("default_sim_sub_id", -1) else null

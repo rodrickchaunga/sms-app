@@ -60,11 +60,10 @@ fun ArchivedScreen(repo: SmsRepository, onBack: () -> Unit, onOpen: (String) -> 
             }
             items(list, key = { it.address }) { c ->
                 ContactListItem(
-                    address = c.address, body = c.body, timestamp = c.timestamp, selected = c.address in selected,
+                    address = c.address, body = c.body, timestamp = c.timestamp, lastOutgoing = c.lastOutgoing, selected = c.address in selected,
                     onClick = { if (selecting) toggle(c.address) else onOpen(c.address) },
                     onLongClick = { toggle(c.address) }
                 )
-                HorizontalDivider(thickness = 0.5.dp, color = Color.LightGray.copy(alpha = 0.5f))
             }
         }
     }

@@ -30,7 +30,7 @@ fun SpamScreen(repo: SmsRepository, onBack: () -> Unit) {
         topBar = {
             TopAppBar(
                 colors = smsTopBarColors(),
-                title = { Text("Spam and blocked", fontWeight = FontWeight.Bold) },
+                title = { Text("Spam and blocked", fontWeight = FontWeight.Medium) },
                 navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") } }
             )
         }

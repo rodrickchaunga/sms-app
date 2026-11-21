@@ -5,6 +5,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -35,6 +37,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.smsapp.data.ConversationPreview
 import com.example.smsapp.data.SmsRepository
 import com.example.smsapp.data.getContactName
 import kotlinx.coroutines.Dispatchers
@@ -68,6 +71,7 @@ fun ConversationListScreen(
     onSpam: () -> Unit = {},
     onPersonalize: () -> Unit = {},
     onSettings: () -> Unit = {},
+    listState: LazyListState = rememberLazyListState(),
     modifier: Modifier = Modifier
 ) {
     var menuOpen by remember { mutableStateOf(false) }
@@ -75,11 +79,13 @@ fun ConversationListScreen(
     var isSearching by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
-    val list by if (searchQuery.isBlank()) {
-        repo.conversations.collectAsState(initial = emptyList())
-    } else {
-        repo.search(searchQuery).collectAsState(initial = emptyList())
-    }
+    // null until the first load, so the list is not built empty (which would reset its scroll position) on the way back from a chat.
+    val listFlow = remember(searchQuery) { if (searchQuery.isBlank()) repo.conversations else repo.search(searchQuery) }
+    val loadedList: List<ConversationPreview>? by listFlow.collectAsState(initial = null as List<ConversationPreview>?)
+    val list = loadedList ?: emptyList()
+    // Search results get their own scroll state; the hoisted one belongs to the full list.
+    val searchListState = rememberLazyListState()
+    val activeListState = if (searchQuery.isBlank()) listState else searchListState
 
     var selected by remember { mutableStateOf(setOf<String>()) }
     var confirmDelete by remember { mutableStateOf(false) }
@@ -172,7 +178,11 @@ fun ConversationListScreen(
             }
         }
     ) { pad ->
-        LazyColumn(Modifier.padding(pad).fillMaxSize().roundedTop().background(MaterialTheme.colorScheme.background)) {
+        if (loadedList == null) {
+            Box(Modifier.padding(pad).fillMaxSize().roundedTop().background(MaterialTheme.colorScheme.background))
+            return@Scaffold
+        }
+        LazyColumn(Modifier.padding(pad).fillMaxSize().roundedTop().background(MaterialTheme.colorScheme.background), state = activeListState) {
             if (list.isEmpty()) {
                 item {
                     Text(
@@ -271,7 +281,7 @@ fun ContactListItem(
         modifier = Modifier.fillMaxWidth()
             .background(if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.14f) else Color.Transparent)
             .combinedClickable(onClick = onClick, onLongClick = onLongClick)
-            .padding(horizontal = 16.dp, vertical = 12.dp),
+            .padding(horizontal = 16.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         ContactAvatar(name = displayName, isContact = isContact, size = 48.dp, selected = selected)
@@ -280,13 +290,13 @@ fun ContactListItem(
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 displayName, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 16.sp,
-                fontWeight = if (unread > 0) FontWeight.Bold else FontWeight.Medium
+                fontWeight = if (unread > 0) FontWeight.SemiBold else FontWeight.Medium
             )
             Spacer(modifier = Modifier.height(2.dp))
             Text(
                 preview, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 14.sp,
                 color = if (unread > 0) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
-                fontWeight = if (unread > 0) FontWeight.Bold else FontWeight.Normal
+                fontWeight = if (unread > 0) FontWeight.Medium else FontWeight.Normal
             )
         }
 
@@ -300,7 +310,7 @@ fun ContactListItem(
                 Text(
                     stamp, fontSize = 12.sp,
                     color = if (unread > 0) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
-                    fontWeight = if (unread > 0) FontWeight.Bold else FontWeight.Normal
+                    fontWeight = if (unread > 0) FontWeight.Medium else FontWeight.Normal
                 )
             }
             if (unread > 0) {
@@ -309,7 +319,7 @@ fun ContactListItem(
                     Modifier.defaultMinSize(minWidth = 22.dp, minHeight = 22.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primary).padding(horizontal = 5.dp),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text(if (unread > 99) "99+" else unread.toString(), color = MaterialTheme.colorScheme.onPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+                    Text(if (unread > 99) "99+" else unread.toString(), color = MaterialTheme.colorScheme.onPrimary, fontSize = 12.sp, fontWeight = FontWeight.Medium, textAlign = TextAlign.Center)
                 }
             }
         }

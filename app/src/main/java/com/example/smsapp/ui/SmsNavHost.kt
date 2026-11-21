@@ -1,5 +1,6 @@
 package com.example.smsapp.ui
 
+import androidx.compose.foundation.lazy.rememberLazyListState
 import android.view.WindowManager
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
@@ -36,6 +37,8 @@ fun SmsNavHost(repo: SmsRepository, launch: LaunchRequest?) {
     var inPrivateSpace by remember { mutableStateOf(false) }
     var showNewConversation by remember { mutableStateOf(false) }
     var showArchived by remember { mutableStateOf(false) }
+    // Lives here (not inside the list screen) so the list is where you left it after opening a chat and pressing back.
+    val conversationListState = rememberLazyListState()
     var showSpam by remember { mutableStateOf(false) }
     var showSettings by remember { mutableStateOf(false) }
     var showPersonalize by remember { mutableStateOf(false) }
@@ -178,7 +181,8 @@ fun SmsNavHost(repo: SmsRepository, launch: LaunchRequest?) {
     } else {
         ConversationListScreen(
             repo, onOpen = ::openAddress, onNewConversation = { showNewConversation = true }, onPrivateSpace = ::requestPrivateSpace,
-            onArchived = { showArchived = true }, onSpam = { showSpam = true }, onPersonalize = { showPersonalize = true }, onSettings = { showSettings = true }
+            onArchived = { showArchived = true }, onSpam = { showSpam = true }, onPersonalize = { showPersonalize = true }, onSettings = { showSettings = true },
+            listState = conversationListState
         )
     }
 }

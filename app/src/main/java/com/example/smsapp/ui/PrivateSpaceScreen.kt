@@ -129,7 +129,7 @@ fun PrivateSpaceScreen(repo: SmsRepository, security: VaultSecurity, onOpen: (St
                     )
                 } else {
                     TopAppBar(
-                        title = { Text("Private", fontWeight = FontWeight.Bold) },
+                        title = { Text("Private", fontWeight = FontWeight.Medium) },
                         navigationIcon = { IconButton(onClick = onExit) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") } },
                         actions = {
                             IconButton(onClick = { menuExpanded = true }) { Icon(Icons.Default.MoreVert, "More") }

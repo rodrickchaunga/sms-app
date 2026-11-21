@@ -49,7 +49,7 @@ fun ArchivedScreen(repo: SmsRepository, onBack: () -> Unit, onOpen: (String) -> 
             )
         } else {
             TopAppBar(
-                title = { Text("Archived", fontWeight = FontWeight.Bold) },
+                title = { Text("Archived", fontWeight = FontWeight.Medium) },
                 navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") } }
             )
         }

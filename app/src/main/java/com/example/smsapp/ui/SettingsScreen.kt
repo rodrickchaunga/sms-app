@@ -65,7 +65,7 @@ fun SettingsScreen(repo: SmsRepository, onOpenConversation: (String) -> Unit, on
     var delayMinutes by remember { mutableStateOf("10") }
     val roleLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { isDefaultSms = checkDefaultSms() }
 
-    Scaffold(modifier = modifier, topBar = { TopAppBar(colors = smsTopBarColors(), title = { Text("Settings", fontWeight = FontWeight.Bold) }, navigationIcon = { onBack?.let { back -> IconButton(onClick = back) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") } } }) }) { pad ->
+    Scaffold(modifier = modifier, topBar = { TopAppBar(colors = smsTopBarColors(), title = { Text("Settings", fontWeight = FontWeight.Medium) }, navigationIcon = { onBack?.let { back -> IconButton(onClick = back) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") } } }) }) { pad ->
         Column(Modifier.padding(pad).padding(16.dp).verticalScroll(rememberScrollState())) {
             Text("Messaging", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
             ListItem(headlineContent = { Text("Default SMS application") }, supportingContent = { Text(if (isDefaultSms) "Active: this app is your default SMS app" else "Not the default app. Required to receive and manage messages") }, trailingContent = {

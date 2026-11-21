@@ -44,12 +44,12 @@ fun ConversationDetailsScreen(
     val initial = remember(displayName) { displayName.firstOrNull()?.uppercase() ?: "?" }
 
     Scaffold(topBar = {
-        TopAppBar(title = { Text("Contact details", fontWeight = FontWeight.Bold) }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") } })
+        TopAppBar(title = { Text("Contact details", fontWeight = FontWeight.Medium) }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") } })
     }) { pad ->
         Column(Modifier.padding(pad).fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp)) {
             Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
                 Box(Modifier.size(84.dp).clip(CircleShape).background(avatarColor), contentAlignment = Alignment.Center) {
-                    Text(initial, color = Color.White, fontSize = 36.sp, fontWeight = FontWeight.Bold)
+                    Text(initial, color = Color.White, fontSize = 36.sp, fontWeight = FontWeight.Medium)
                 }
                 Text(displayName, style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(top = 12.dp))
                 if (displayName != address) Text(address, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)

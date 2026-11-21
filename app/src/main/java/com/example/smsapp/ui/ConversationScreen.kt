@@ -1,5 +1,8 @@
 package com.example.smsapp.ui
 
+import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.foundation.BorderStroke
 import android.content.Intent
 import android.net.Uri
 import android.provider.ContactsContract
@@ -239,6 +242,13 @@ fun ConversationScreen(repo: SmsRepository, address: String, privateMode: Boolea
     BackHandler(enabled = infoMessage != null) { infoMessage = null }
     BackHandler(enabled = selecting && !showDetails) { selectedIds = emptySet() }
 
+    // Declared here, outside the screen branches below, so opening Details and coming back keeps the reader where they were.
+    val listState = rememberLazyListState()
+    val newest = msgs.lastOrNull()
+    // The list is anchored to the bottom (newest message last on screen). Follow new messages unless the reader scrolled up.
+    LaunchedEffect(newest?.id) {
+        if (newest != null && (newest.outgoing || listState.firstVisibleItemIndex <= 2)) listState.scrollToItem(0)
+    }
     val detailsFor = infoMessage?.let { shown -> msgs.firstOrNull { it.id == shown.id } ?: shown }
     if (detailsFor != null) {
         val shownSim = sims.firstOrNull { sim -> sim.subscriptionId == detailsFor.subscriptionId }?.let { sim -> sim.carrier.ifBlank { sim.name } }
@@ -264,13 +274,7 @@ fun ConversationScreen(repo: SmsRepository, address: String, privateMode: Boolea
             onBlock = onBlock, onArchive = onArchive, onUnvault = onUnvault, onDelete = { showDeleteConfirm = true }
         )
     } else {
-        val listState = rememberLazyListState()
         val showJump by remember { derivedStateOf { listState.firstVisibleItemIndex > 3 } }
-        val newest = msgs.lastOrNull()
-        // The list is anchored to the bottom (newest message last on screen). Follow new messages unless the reader scrolled up.
-        LaunchedEffect(newest?.id) {
-            if (newest != null && (newest.outgoing || listState.firstVisibleItemIndex <= 2)) listState.scrollToItem(0)
-        }
         Scaffold(
             modifier = Modifier.imePadding(),
             containerColor = chatBackgroundColor(look),
@@ -415,7 +419,7 @@ fun ConversationScreen(repo: SmsRepository, address: String, privateMode: Boolea
                 ) {
                     Row(Modifier.padding(start = 16.dp, top = 8.dp, bottom = 4.dp, end = 4.dp), verticalAlignment = Alignment.Top) {
                         Column(Modifier.weight(1f)) {
-                            Text("Unknown number", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onTertiaryContainer)
+                            Text("Unknown number", fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onTertiaryContainer)
                             Text(
                                 "This number isn't in your contacts. Be careful with links and with requests for money or codes.",
                                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onTertiaryContainer
@@ -465,10 +469,15 @@ fun ConversationScreen(repo: SmsRepository, address: String, privateMode: Boolea
                         horizontalAlignment = if (m.outgoing) Alignment.End else Alignment.Start
                     ) {
                         Row(verticalAlignment = Alignment.Bottom) {
+                            // Light decoration: a 6% lighter top fading into the bubble colour, and a hairline edge. No shadows.
+                            val shape = bubbleShape(look.bubbleStyle, m.outgoing)
                             Surface(
-                                modifier = Modifier.widthIn(max = bubbleMax).combinedClickable(onClick = bubbleTap, onLongClick = bubbleLong),
-                                color = bubbleBg,
-                                shape = bubbleShape(look.bubbleStyle, m.outgoing)
+                                modifier = Modifier.widthIn(max = bubbleMax)
+                                    .background(Brush.verticalGradient(listOf(lerp(bubbleBg, Color.White, 0.06f), bubbleBg)), shape)
+                                    .combinedClickable(onClick = bubbleTap, onLongClick = bubbleLong),
+                                color = Color.Transparent,
+                                shape = shape,
+                                border = BorderStroke(0.5.dp, fg.copy(alpha = 0.10f))
                             ) {
                                 if (numbers.isEmpty()) {
                                     Text(
@@ -505,23 +514,19 @@ fun ConversationScreen(repo: SmsRepository, address: String, privateMode: Boolea
                             }
                             if (m.isStarred) Text(" ★", style = MaterialTheme.typography.labelSmall, color = Color(0xFFFFA000))
                         }
-                        // Which SIM the message used, on dual-SIM phones ("• Airtel").
+                        // Which SIM the message used, on dual-SIM phones. Shown on the date/time line when the message is tapped.
                         val simTag = if (sims.size > 1) sims.firstOrNull { sim -> sim.subscriptionId == m.subscriptionId }?.let { sim -> sim.carrier.ifBlank { sim.name } } else null
-                        if (simTag != null) Text(
-                            "• $simTag", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
-                        )
                         // Time and status stay hidden until the message is tapped. A message that failed to send is the one exception.
                         if (showDetail || failed) {
                             val time = java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.SHORT, java.text.DateFormat.SHORT).format(java.util.Date(m.timestamp))
                             Row(Modifier.padding(start = if (m.outgoing) 0.dp else 4.dp, top = 2.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Text(
-                                    if (showDetail) (if (m.outgoing) "$time · ${statusLabel(m.status)}" else time) else "Not sent",
+                                    if (showDetail) listOfNotNull(time, if (m.outgoing) statusLabel(m.status) else null, simTag).joinToString(" · ") else "Not sent",
                                     style = MaterialTheme.typography.labelSmall,
                                     color = if (failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                                 if (failed) Text(
-                                    "  Retry", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold,
+                                    "  Retry", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Medium,
                                     color = MaterialTheme.colorScheme.primary,
                                     modifier = Modifier.clickable { retry(m.id) }.padding(vertical = 4.dp)
                                 )
@@ -623,7 +628,14 @@ private fun DateHeader(text: String) {
 /** "Texting with Mula Jose (SMS/MMS)" and "Sending with Airtel" (the SIM is a link that opens the SIM picker on dual-SIM phones). */
 @Composable
 private fun ConversationIntro(name: String, simName: String?, onSimClick: (() -> Unit)?) {
-    Column(Modifier.fillMaxWidth().padding(vertical = 8.dp, horizontal = 16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+    val tint = MaterialTheme.colorScheme.primary
+    // A soft strip that fades out at both ends, behind the "Texting with / Sending with" lines.
+    Column(
+        Modifier.fillMaxWidth().padding(vertical = 8.dp)
+            .background(Brush.horizontalGradient(listOf(Color.Transparent, tint.copy(alpha = 0.10f), Color.Transparent)))
+            .padding(vertical = 12.dp, horizontal = 16.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
         Text("Texting with $name (SMS/MMS)", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
         if (!simName.isNullOrBlank()) {
             Spacer(Modifier.height(14.dp))

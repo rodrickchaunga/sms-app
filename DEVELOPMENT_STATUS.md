@@ -1,13 +1,20 @@
 # SMS App V2.0 — development status
 
-## Phase 3.9 (this delivery): details screen, sender notice, SIM labels, private-number fix
+## Phase 4.0 (this delivery): light decoration
+
+Lightweight only (no blur, shadows or animations): lighter font weights (titles Medium, unread names SemiBold, unread preview/time/badge Medium instead of Bold), chat bubbles get a 6% lighter top fading to the bubble colour plus a hairline edge, the "Texting with / Sending with" block sits on a soft strip that fades at both ends, list rows have slightly more vertical padding. Scroll position is kept on back from a chat (list) and from Details (chat); the SIM carrier shows on the tapped date/time line.
+
+---
+
+## Phase 3.9 (previous): details screen, sender notice, SIM labels, private-number fix
 
 Not compiled in the authoring environment (no Android SDK): fix the first compiler error first. Room database version is now 10 (migration 9->10: `subscriptionId` on `messages`).
 
 1. Long-press a message opens a Details screen: the message, Status (Received/Sent, or Sent/Delivered for your own messages; Status/Time for failed ones), Type, From/To, SIM, and the message actions (Retry, Select, Copy text, Forward, Star, Delete).
 2. Senders you cannot reply to (names such as MPAMBA or TNM Promos) replace the message box with "Sender can't accept replies. Contact them directly. Learn more"; Learn more opens the short-code explanation with OK.
 3. Top of a chat (and a brand-new chat): "Texting with <name> (SMS/MMS)" and "Sending with <carrier>"; on dual-SIM phones the carrier is a link that opens the SIM picker. The old "start of a new conversation" text is gone.
-4. Each message records the SIM it arrived on or was sent from and shows "• Airtel" under it on dual-SIM phones. Older messages have no label.
+4. Each message records the SIM it arrived on or was sent from. On dual-SIM phones the carrier appears on the same line as the date/time when a message is tapped ("21/11/2026, 7:08 am · Airtel") and disappears with it. Older messages have no label.
+   Back-navigation keeps scroll position: the conversation list returns to where you were after opening a chat, and a chat returns to the same message after Details/Conversation details.
 5. Date headers: `Yesterday • ...`, weekday for the last week, `Friday, 6 Nov • 9:26 pm` after that.
 6. Private numbers saved as 099... or 088...: a message that arrives as +265... is now stored under the saved address, so it shows in that private chat. Opening the private space also moves earlier messages that were stored under the +265... spelling onto the saved number.
 

@@ -150,7 +150,7 @@ fun PrivateSpaceScreen(repo: SmsRepository, security: VaultSecurity, onOpen: (St
                 }
                 items(convos, key = { it.address }) { c ->
                     ContactListItem(
-                        address = c.address, body = c.body, timestamp = c.timestamp, unread = c.unread, lastOutgoing = c.lastOutgoing,
+                        address = c.address, body = c.body, timestamp = c.timestamp, unread = c.unread, lastOutgoing = c.lastOutgoing, lastStatus = c.lastStatus,
                         selected = c.address in selected,
                         onClick = { if (selecting) toggle(c.address) else onOpen(c.address) },
                         onLongClick = { toggle(c.address) }

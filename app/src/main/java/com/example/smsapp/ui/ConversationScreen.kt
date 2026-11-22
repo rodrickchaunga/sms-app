@@ -2,7 +2,12 @@ package com.example.smsapp.ui
 
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.Brush
-import androidx.compose.foundation.BorderStroke
+import androidx.compose.ui.draw.blur
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
+import kotlinx.coroutines.flow.collectLatest
 import android.content.Intent
 import android.net.Uri
 import android.provider.ContactsContract
@@ -99,6 +104,10 @@ fun ConversationScreen(repo: SmsRepository, address: String, privateMode: Boolea
     var revealed by remember { mutableStateOf(setOf<Long>()) }
     var selectedIds by remember { mutableStateOf(setOf<Long>()) }
     var infoMessage by remember { mutableStateOf<MessageEntity?>(null) }
+    var menuMessage by remember { mutableStateOf<MessageEntity?>(null) }
+    var menuBounds by remember { mutableStateOf<Rect?>(null) }
+    // Where each visible bubble is on screen (window coordinates); read only when a message is long-pressed.
+    val bubbleCoords = remember { HashMap<Long, LayoutCoordinates>() }
     var showDeleteSelected by remember { mutableStateOf(false) }
     var convPrefs by remember { mutableStateOf<ConversationPrefsEntity?>(null) }
     val selecting = selectedIds.isNotEmpty()
@@ -144,10 +153,13 @@ fun ConversationScreen(repo: SmsRepository, address: String, privateMode: Boolea
         isKnownContact = name != null
     }
 
-    LaunchedEffect(address, draft, draftLoaded) {
+    // draft is read inside snapshotFlow, not here, so typing recomposes only the message box and not the whole chat.
+    LaunchedEffect(address, draftLoaded) {
         if (draftLoaded) {
-            kotlinx.coroutines.delay(500)
-            runCatching { repo.saveDraft(address, draft) }
+            androidx.compose.runtime.snapshotFlow { draft }.collectLatest { text ->
+                kotlinx.coroutines.delay(500)
+                runCatching { repo.saveDraft(address, text) }
+            }
         }
     }
 
@@ -276,7 +288,8 @@ fun ConversationScreen(repo: SmsRepository, address: String, privateMode: Boolea
     } else {
         val showJump by remember { derivedStateOf { listState.firstVisibleItemIndex > 3 } }
         Scaffold(
-            modifier = Modifier.imePadding(),
+            // Blur (Android 12+) only while the long-press menu is open; older phones just get the dim.
+            modifier = Modifier.imePadding().then(if (menuMessage != null && android.os.Build.VERSION.SDK_INT >= 31) Modifier.blur(12.dp) else Modifier),
             containerColor = chatBackgroundColor(look),
             topBar = {
                 if (selecting) {
@@ -460,7 +473,10 @@ fun ConversationScreen(repo: SmsRepository, address: String, privateMode: Boolea
                         if (selecting) toggleSelected(m.id)
                         else revealed = if (showDetail) revealed - m.id else revealed + m.id
                     }
-                    val bubbleLong: () -> Unit = { if (selecting) toggleSelected(m.id) else infoMessage = m }
+                    val bubbleLong: () -> Unit = {
+                        if (selecting) toggleSelected(m.id)
+                        else bubbleCoords[m.id]?.takeIf { it.isAttached }?.boundsInWindow()?.let { bounds -> menuBounds = bounds; menuMessage = m }
+                    }
                     val numbers = remember(m.body) { findPhoneNumbers(m.body) }
                     Column(
                         Modifier.fillMaxWidth()
@@ -469,15 +485,15 @@ fun ConversationScreen(repo: SmsRepository, address: String, privateMode: Boolea
                         horizontalAlignment = if (m.outgoing) Alignment.End else Alignment.Start
                     ) {
                         Row(verticalAlignment = Alignment.Bottom) {
-                            // Light decoration: a 6% lighter top fading into the bubble colour, and a hairline edge. No shadows.
-                            val shape = bubbleShape(look.bubbleStyle, m.outgoing)
                             Surface(
                                 modifier = Modifier.widthIn(max = bubbleMax)
-                                    .background(Brush.verticalGradient(listOf(lerp(bubbleBg, Color.White, 0.06f), bubbleBg)), shape)
+                                    .onGloballyPositioned { coords ->
+                                        bubbleCoords[m.id] = coords
+                                        if (bubbleCoords.size > 64) bubbleCoords.values.removeAll { stale -> !stale.isAttached }
+                                    }
                                     .combinedClickable(onClick = bubbleTap, onLongClick = bubbleLong),
-                                color = Color.Transparent,
-                                shape = shape,
-                                border = BorderStroke(0.5.dp, fg.copy(alpha = 0.10f))
+                                color = bubbleBg,
+                                shape = bubbleShape(look.bubbleStyle, m.outgoing)
                             ) {
                                 if (numbers.isEmpty()) {
                                     Text(
@@ -558,6 +574,25 @@ fun ConversationScreen(repo: SmsRepository, address: String, privateMode: Boolea
         onSelect = { choice -> scope.launch { repo.setConversationSim(address, choice) }; convoSim = choice; showSimPicker = false },
         onDismiss = { showSimPicker = false }
     )
+    menuMessage?.let { target ->
+        val live = msgs.firstOrNull { it.id == target.id } ?: target
+        MessageMenu(
+            message = live, anchor = menuBounds ?: Rect.Zero, secure = privateMode, verticalPad = look.spacing.pad.dp,
+            bubbleColor = bubbleColor(look, live.outgoing), bubbleShape = bubbleShape(look.bubbleStyle, live.outgoing), textFont = look.messageFont.family(),
+            canRetry = live.outgoing && live.status.startsWith("failed"),
+            onDismiss = { menuMessage = null },
+            onRetry = { retry(live.id); menuMessage = null },
+            onForward = { lastSelectedMessageId = live.id; forwardNumber = ""; showForwardDialog = true; menuMessage = null },
+            onCopy = {
+                context.getSystemService(android.content.ClipboardManager::class.java)?.setPrimaryClip(android.content.ClipData.newPlainText("SMS message", live.body))
+                menuMessage = null
+            },
+            onStar = { scope.launch { repo.star(live.id, !live.isStarred) }; menuMessage = null },
+            onDelete = { selectedIds = setOf(live.id); showDeleteSelected = true; menuMessage = null },
+            onSelectMore = { selectedIds = setOf(live.id); menuMessage = null },
+            onInfo = { infoMessage = live; menuMessage = null }
+        )
+    }
     if (showReplyHelp) AlertDialog(
         onDismissRequest = { showReplyHelp = false },
         text = { Text("Short codes are local or personalized numbers for sending international SMS messages.\n\nYou can reply to numbers-only short codes, but not to codes with letters and numbers, like “MSG007.”") },

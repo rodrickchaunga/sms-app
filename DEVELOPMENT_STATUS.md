@@ -1,6 +1,23 @@
 # SMS App V2.0 — development status
 
-## Phase 4.0 (this delivery): light decoration
+## Phase 4.2 (this delivery): menu over the message, drafts, delivery ticks
+
+- Long-press menu: the message is redrawn exactly where it was (same position and width) with the actions under it, on the same side; above it when there is no room below. Uses a Popup with the bubble's window bounds, which are recorded per visible bubble (a cheap assignment) and read only on long-press.
+- Conversation list: an unsent draft shows as `Draft: <text>` (label in the error colour, text in italics) instead of the last message. A new chat with typed text but no messages also appears in the list. Private-space drafts are not shown in the main list (they stay encrypted).
+- Conversation list: when my message is the latest, a circle under the time shows its state: empty circle = sending, one tick = sent, two ticks = delivered (needs delivery reports on), `!` = failed or delivery failed. The unread badge shows instead when the latest message is received.
+- No database schema change (new columns are query results only).
+
+---
+
+## Phase 4.1 (previous): speed fix + long-press menu
+
+- Typing lag: the draft text was read in the body of `ConversationScreen`, so every keystroke recomposed the whole chat (all visible bubbles). It is now read through `snapshotFlow` (draft saving) and inside the message box only.
+- Scrolling: removed the per-bubble gradient and hairline edge added in 4.0; date formatters are cached instead of rebuilt for every list row. Light font weights and the soft "Texting with" strip stay (they cost nothing per frame).
+- Long-press on a message opens a menu (Forward, Copy, Star, Delete, Select more, Info) on the side the message came from, over a dimmed chat, blurred on Android 12+. Info opens the Details screen. The menu is vertically centred (it is not anchored over the original message). Delete asks for confirmation as before.
+
+---
+
+## Phase 4.0 (previous): light decoration
 
 Lightweight only (no blur, shadows or animations): lighter font weights (titles Medium, unread names SemiBold, unread preview/time/badge Medium instead of Bold), chat bubbles get a 6% lighter top fading to the bubble colour plus a hairline edge, the "Texting with / Sending with" block sits on a soft strip that fades at both ends, list rows have slightly more vertical padding. Scroll position is kept on back from a chat (list) and from Details (chat); the SIM carrier shows on the tapped date/time line.
 

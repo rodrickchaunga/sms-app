@@ -1,12 +1,14 @@
 package com.example.smsapp.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -53,6 +55,29 @@ fun ContactAvatar(name: String, isContact: Boolean, size: Dp, modifier: Modifier
             selected -> Icon(Icons.Default.Check, contentDescription = "Selected", tint = foreground)
             isContact -> Text(name.firstOrNull()?.uppercase() ?: "?", color = foreground, fontSize = (size.value * 0.42f).sp, fontWeight = FontWeight.Medium)
             else -> Icon(Icons.Default.Person, contentDescription = null, tint = foreground, modifier = Modifier.size(size * 0.58f))
+        }
+    }
+}
+
+/**
+ * Where a message I sent got to, as a small circle: empty = still sending, one tick = sent, two ticks = delivered, ! = failed.
+ * ("Delivered" needs delivery reports turned on in Settings; otherwise the best it can reach is sent.)
+ */
+@Composable
+fun DeliveryBadge(status: String, size: Dp = 18.dp) {
+    val failed = status.startsWith("failed") || status == "delivery failed"
+    val delivered = status == "delivered"
+    val color = when {
+        failed -> MaterialTheme.colorScheme.error
+        delivered -> MaterialTheme.colorScheme.primary
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    Box(Modifier.size(size).border(1.5.dp, color, CircleShape), contentAlignment = Alignment.Center) {
+        when {
+            failed -> Text("!", color = color, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+            delivered -> Icon(Icons.Default.DoneAll, contentDescription = "Delivered", tint = color, modifier = Modifier.size(11.dp))
+            status == "sending" || status.isBlank() -> Unit
+            else -> Icon(Icons.Default.Check, contentDescription = "Sent", tint = color, modifier = Modifier.size(11.dp))
         }
     }
 }

@@ -1,5 +1,10 @@
 package com.example.smsapp.ui
 
+import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.AnnotatedString
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
@@ -226,7 +231,7 @@ fun ConversationListScreen(
                 ) {
                     Column(Modifier.background(MaterialTheme.colorScheme.background)) {
                         ContactListItem(
-                            address = c.address, body = c.body, timestamp = c.timestamp, unread = c.unread, pinned = c.isPinned, lastOutgoing = c.lastOutgoing,
+                            address = c.address, body = c.body, timestamp = c.timestamp, unread = c.unread, pinned = c.isPinned, lastOutgoing = c.lastOutgoing, lastStatus = c.lastStatus, draft = c.draft,
                             selected = c.address in selected,
                             onClick = { if (selecting) toggle(c.address) else onOpen(c.address) },
                             onLongClick = { toggle(c.address) }
@@ -268,14 +273,21 @@ fun ConversationListScreen(
 @Composable
 fun ContactListItem(
     address: String, body: String, timestamp: Long, unread: Int = 0, selected: Boolean = false, pinned: Boolean = false,
-    lastOutgoing: Boolean = false, onClick: () -> Unit, onLongClick: () -> Unit = {}
+    lastOutgoing: Boolean = false, lastStatus: String = "", draft: String? = null, onClick: () -> Unit, onLongClick: () -> Unit = {}
 ) {
     val displayName = rememberDisplayName(address)
     val isContact = displayName != address
     val use24h = android.text.format.DateFormat.is24HourFormat(LocalContext.current)
     val stamp = remember(timestamp, use24h) { ChatTime.listStamp(timestamp, use24h) }
     // Last message sent by me: "You: Hi". A received message shows just its text.
-    val preview = if (lastOutgoing && body.isNotBlank()) "You: $body" else body
+    // An unsent draft wins over the last message: "Draft: <text>" with the text in italics.
+    val draftColor = MaterialTheme.colorScheme.error
+    val preview = remember(body, lastOutgoing, draft, draftColor) {
+        if (!draft.isNullOrBlank()) buildAnnotatedString {
+            withStyle(SpanStyle(color = draftColor, fontStyle = FontStyle.Italic)) { append("Draft: ") }
+            withStyle(SpanStyle(fontStyle = FontStyle.Italic)) { append(draft.replace('\n', ' ')) }
+        } else AnnotatedString(if (lastOutgoing && body.isNotBlank()) "You: $body" else body)
+    }
 
     Row(
         modifier = Modifier.fillMaxWidth()
@@ -313,7 +325,11 @@ fun ContactListItem(
                     fontWeight = if (unread > 0) FontWeight.Medium else FontWeight.Normal
                 )
             }
-            if (unread > 0) {
+            if (lastOutgoing && draft.isNullOrBlank() && body.isNotBlank()) {
+                // My message is the latest: show how it went (sent / delivered / failed) where the unread badge would be.
+                Spacer(Modifier.height(6.dp))
+                DeliveryBadge(lastStatus)
+            } else if (unread > 0) {
                 Spacer(Modifier.height(6.dp))
                 Box(
                     Modifier.defaultMinSize(minWidth = 22.dp, minHeight = 22.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primary).padding(horizontal = 5.dp),

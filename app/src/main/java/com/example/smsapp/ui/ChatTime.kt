@@ -14,11 +14,16 @@ object ChatTime {
     const val SEPARATOR_GAP_MS = 60L * 60L * 1000L
 
     private val zone: ZoneId get() = ZoneId.systemDefault()
+    private val formatters = java.util.concurrent.ConcurrentHashMap<String, DateTimeFormatter>()
+    private fun fmt(pattern: String): DateTimeFormatter {
+        val locale = Locale.getDefault()
+        return formatters.getOrPut("$pattern|$locale") { DateTimeFormatter.ofPattern(pattern, locale) }
+    }
     private fun dateOf(ts: Long): LocalDate = Instant.ofEpochMilli(ts).atZone(zone).toLocalDate()
 
     private fun clock(ts: Long, use24h: Boolean): String {
         val pattern = if (use24h) "HH:mm" else "h:mm a"
-        val text = DateTimeFormatter.ofPattern(pattern, Locale.getDefault()).format(Instant.ofEpochMilli(ts).atZone(zone))
+        val text = fmt(pattern).format(Instant.ofEpochMilli(ts).atZone(zone))
         return text.replace("AM", "am").replace("PM", "pm")
     }
 
@@ -29,7 +34,7 @@ object ChatTime {
     fun listStamp(ts: Long, use24h: Boolean): String {
         val date = dateOf(ts)
         val pattern = if (date.year == LocalDate.now(zone).year) "dd/MM" else "dd/MM/yy"
-        return "${DateTimeFormatter.ofPattern(pattern, Locale.getDefault()).format(date)}, ${clock(ts, use24h)}"
+        return "${fmt(pattern).format(date)}, ${clock(ts, use24h)}"
     }
 
     /** Message details: "Today, 7:08 am", "Yesterday, 7:08 am", "6 Nov, 9:26 pm" (year added for older years). */
@@ -40,8 +45,8 @@ object ChatTime {
         return when {
             date == today -> "Today, $time"
             date == today.minusDays(1) -> "Yesterday, $time"
-            date.year == today.year -> "${DateTimeFormatter.ofPattern("d MMM", Locale.getDefault()).format(date)}, $time"
-            else -> "${DateTimeFormatter.ofPattern("d MMM yyyy", Locale.getDefault()).format(date)}, $time"
+            date.year == today.year -> "${fmt("d MMM").format(date)}, $time"
+            else -> "${fmt("d MMM yyyy").format(date)}, $time"
         }
     }
 
@@ -55,8 +60,8 @@ object ChatTime {
             days == 0L -> time
             days == 1L -> "Yesterday • $time"
             days in 2L..6L -> "${date.dayOfWeek.getDisplayName(TextStyle.FULL, Locale.getDefault())} • $time"
-            date.year == today.year -> "${DateTimeFormatter.ofPattern("EEEE, d MMM", Locale.getDefault()).format(date)} • $time"
-            else -> "${DateTimeFormatter.ofPattern("EEEE, d MMM yyyy", Locale.getDefault()).format(date)} • $time"
+            date.year == today.year -> "${fmt("EEEE, d MMM").format(date)} • $time"
+            else -> "${fmt("EEEE, d MMM yyyy").format(date)} • $time"
         }
     }
 }

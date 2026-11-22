@@ -17,7 +17,10 @@ import com.example.smsapp.notify.NotificationHelper
 data class IngestResult(val id: Long, val vaulted: Boolean, val blocked: Boolean, val address: String)
 
 class SmsRepository(private val context: Context, private val dao: MessageDao) {
-    val conversations: Flow<List<ConversationPreview>> = dao.conversations()
+    val conversations: Flow<List<ConversationPreview>> = kotlinx.coroutines.flow.combine(dao.conversations(), dao.draftOnlyConversations()) { chats, drafts ->
+        if (drafts.isEmpty()) chats
+        else (chats + drafts).sortedWith(compareByDescending<ConversationPreview> { it.isPinned }.thenByDescending { it.timestamp })
+    }
     fun search(query: String): Flow<List<ConversationPreview>> =
         dao.searchConversations(query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_"))
     fun thread(addr: String): Flow<List<MessageEntity>> = dao.thread(addr)

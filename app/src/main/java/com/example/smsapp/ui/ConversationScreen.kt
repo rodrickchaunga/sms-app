@@ -66,6 +66,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.buildAnnotatedString
@@ -102,7 +105,6 @@ fun ConversationScreen(repo: SmsRepository, address: String, privateMode: Boolea
     val sendDelaySecs = remember { contextPrefs(context).getInt("send_delay_secs", 0) }
     var pendingBody by remember { mutableStateOf<String?>(null) }
     var pendingLeft by remember { mutableIntStateOf(0) }
-    val sendProgress = remember { androidx.compose.animation.core.Animatable(0f) }
     var pendingJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
     // Long-press on the send button: schedule this text for this number.
     var showQuickSchedule by remember { mutableStateOf(false) }
@@ -276,9 +278,8 @@ fun ConversationScreen(repo: SmsRepository, address: String, privateMode: Boolea
         draft = ""
         if (sendDelaySecs <= 0) { deliver(body); return }
         pendingBody = body
+        pendingLeft = sendDelaySecs
         pendingJob = scope.launch {
-            // The ring around the stop square fills clockwise over exactly the chosen delay.
-            launch { sendProgress.snapTo(0f); sendProgress.animateTo(1f, androidx.compose.animation.core.tween(sendDelaySecs * 1000, easing = androidx.compose.animation.core.LinearEasing)) }
             for (left in sendDelaySecs downTo 1) { pendingLeft = left; kotlinx.coroutines.delay(1000) }
             val ready = pendingBody
             pendingBody = null; pendingJob = null
@@ -310,6 +311,8 @@ fun ConversationScreen(repo: SmsRepository, address: String, privateMode: Boolea
     val listState = rememberLazyListState()
     val newest = msgs.lastOrNull()
     // The list is anchored to the bottom (newest message last on screen). Follow new messages unless the reader scrolled up.
+    // Keep the waiting message in view when it appears.
+    LaunchedEffect(pendingBody != null) { if (pendingBody != null) listState.scrollToItem(0) }
     LaunchedEffect(newest?.id) {
         if (newest != null && (newest.outgoing || listState.firstVisibleItemIndex <= 2)) listState.scrollToItem(0)
     }
@@ -420,31 +423,6 @@ fun ConversationScreen(repo: SmsRepository, address: String, privateMode: Boolea
                     else -> "Text message"
                 }
                 Column(Modifier.background(chatBackgroundColor(look))) {
-                if (pendingBody != null) Surface(
-                    color = MaterialTheme.colorScheme.secondaryContainer,
-                    shape = RoundedCornerShape(16.dp),
-                    modifier = Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 6.dp).clickable(onClickLabel = "Undo send", onClick = ::undoSend)
-                ) {
-                    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp)) {
-                        Text("Sending in ${pendingLeft}s", fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSecondaryContainer)
-                        Text(pendingBody.orEmpty().replace('\n', ' '), maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSecondaryContainer)
-                        // Under the text: a stop square inside a ring that fills clockwise over the delay. Tap to undo.
-                        Row(Modifier.padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Box(Modifier.size(40.dp), contentAlignment = Alignment.Center) {
-                                CircularProgressIndicator(
-                                    progress = { sendProgress.value },
-                                    modifier = Modifier.fillMaxSize(),
-                                    strokeWidth = 3.dp,
-                                    color = MaterialTheme.colorScheme.primary,
-                                    trackColor = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.15f)
-                                )
-                                Box(Modifier.size(14.dp).clip(RoundedCornerShape(3.dp)).background(MaterialTheme.colorScheme.primary))
-                            }
-                            Spacer(Modifier.width(12.dp))
-                            Text("Tap to undo", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                        }
-                    }
-                }
                 Row(
                     Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically
@@ -545,6 +523,36 @@ fun ConversationScreen(repo: SmsRepository, address: String, privateMode: Boolea
                 verticalArrangement = Arrangement.spacedBy(look.spacing.gap.dp),
                 contentPadding = PaddingValues(8.dp)
             ) {
+                // Undo send: the waiting message looks exactly like a sent one (newest, at the bottom). Its status line
+                // reads "Double tap to withdraw · 3s" and counts down; a double tap on the bubble takes it back into the box.
+                if (pendingBody != null) item(key = "pending-send") {
+                    val bubbleBg = bubbleColor(look, true)
+                    Column(Modifier.fillMaxWidth().padding(horizontal = 4.dp), horizontalAlignment = Alignment.End) {
+                        Surface(
+                            modifier = Modifier.widthIn(max = bubbleMax)
+                                .semantics { customActions = listOf(CustomAccessibilityAction("Withdraw message") { undoSend(); true }) }
+                                .combinedClickable(
+                                    onClick = {},
+                                    onDoubleClickLabel = "Withdraw message",
+                                    onDoubleClick = { undoSend() }
+                                ),
+                            color = bubbleBg,
+                            shape = bubbleShape(look.bubbleStyle, true)
+                        ) {
+                            Text(
+                                pendingBody.orEmpty(), color = contrastingText(bubbleBg), fontFamily = look.messageFont.family(),
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = look.spacing.pad.dp)
+                            )
+                        }
+                        Row(Modifier.padding(top = 2.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text("Double tap to withdraw", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(
+                                " · ${pendingLeft}s", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
+                }
                 items(rows, key = { it.key }) { row ->
                   when (row) {
                     is DateRow -> DateHeader(row.text)

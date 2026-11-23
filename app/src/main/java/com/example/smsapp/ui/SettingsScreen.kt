@@ -112,7 +112,7 @@ fun SettingsScreen(repo: SmsRepository, onOpenConversation: (String) -> Unit, on
                     TextButton(onClick = { if (simPermission) showSimPicker = true else simPermissionLauncher.launch(android.Manifest.permission.READ_PHONE_STATE) }) { Text(if (simPermission) "Choose" else "Allow") }
                 })
                 ListItem(colors = tc, headlineContent = { Text("Undo send delay") }, supportingContent = {
-                    Text(if (sendDelay == 0) "Off: messages send immediately" else "After you tap send, wait $sendDelay seconds. Tap the bar that appears to stop it and bring the text back into the box")
+                    Text(if (sendDelay == 0) "Off: messages send immediately" else "After you tap send, wait $sendDelay seconds. Double tap the message to withdraw it and bring the text back into the box")
                 })
                 Box(Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
                     ChoiceChips(listOf(0, 3, 5, 10, 15, 30), sendDelay, { if (it == 0) "Off" else "${it}s" }) { secs ->

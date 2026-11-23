@@ -16,6 +16,8 @@ import com.example.smsapp.notify.NotificationHelper
 /** [address] is the thread the message was stored under (for a private number this is the address it was saved with). */
 data class IngestResult(val id: Long, val vaulted: Boolean, val blocked: Boolean, val address: String)
 
+const val BIN_RETENTION_MILLIS = 30L * 24 * 60 * 60 * 1000
+
 class SmsRepository(private val context: Context, private val dao: MessageDao) {
     val conversations: Flow<List<ConversationPreview>> = kotlinx.coroutines.flow.combine(dao.conversations(), dao.draftOnlyConversations()) { chats, drafts ->
         if (drafts.isEmpty()) chats
@@ -232,6 +234,8 @@ class SmsRepository(private val context: Context, private val dao: MessageDao) {
 
     suspend fun setVaulted(address: String, locked: Boolean) = withContext(Dispatchers.IO) {
         if (locked) {
+            // A number that becomes private must leave nothing behind in the (public) Bin.
+            dao.purgeBinned(address)
             val rows = dao.messagesForAddress(address)
             val draft = dao.getDraft(address)
             try {
@@ -290,15 +294,55 @@ class SmsRepository(private val context: Context, private val dao: MessageDao) {
         }
         dao.deleteMessage(id)
     }
+    /**
+     * Deleting a whole ordinary conversation moves it to the Bin (kept 30 days, restorable). Private conversations are
+     * never kept: they are erased immediately and nothing about them reaches the Bin.
+     */
     suspend fun deleteConversation(address: String) = withContext(Dispatchers.IO) {
         val vaulted = isVaulted(address)
-        if (!vaulted) {
-            val ids = dao.messagesForAddress(address).mapNotNull { it.providerId }
-            ids.forEach { id -> runCatching { context.contentResolver.delete(android.content.ContentUris.withAppendedId(Telephony.Sms.CONTENT_URI, id), null, null) } }
+        if (vaulted) {
+            dao.deleteConversation(address, true)
+            dao.deleteDraft(address)
+            dao.deleteConversationPrefs(address)
+            return@withContext
         }
-        dao.deleteConversation(address, vaulted)
+        // The system SMS provider copy goes now (so other apps no longer show it); the Room rows wait in the Bin.
+        val ids = dao.messagesForAddress(address).mapNotNull { it.providerId }
+        ids.forEach { id -> runCatching { context.contentResolver.delete(android.content.ContentUris.withAppendedId(Telephony.Sms.CONTENT_URI, id), null, null) } }
+        dao.binConversation(address, System.currentTimeMillis())
         dao.deleteDraft(address)
-        dao.deleteConversationPrefs(address)
+        runCatching { NotificationHelper.cancel(context, address) }
+    }
+
+    // ---- Bin ---------------------------------------------------------------------------------
+    val binned: Flow<List<BinItem>> = dao.binned()
+    val binnedCount: Flow<Int> = dao.binnedCount()
+    fun binAutoDelete(): Boolean = settings.getBoolean("bin_auto_delete", true)
+    fun setBinAutoDelete(enabled: Boolean) { settings.edit().putBoolean("bin_auto_delete", enabled).apply() }
+
+    /** Puts a deleted conversation back in the list, and back in the system SMS provider where this app is allowed to write. */
+    suspend fun restoreFromBin(address: String) = withContext(Dispatchers.IO) {
+        dao.binnedRows(address).forEach { row ->
+            val values = android.content.ContentValues().apply {
+                put(Telephony.Sms.ADDRESS, row.address); put(Telephony.Sms.BODY, row.body); put(Telephony.Sms.DATE, row.timestamp)
+                put(Telephony.Sms.READ, if (row.isRead || row.outgoing) 1 else 0)
+                put(Telephony.Sms.TYPE, if (row.outgoing) Telephony.Sms.MESSAGE_TYPE_SENT else Telephony.Sms.MESSAGE_TYPE_INBOX)
+            }
+            val uri = runCatching { context.contentResolver.insert(if (row.outgoing) Telephony.Sms.Sent.CONTENT_URI else Telephony.Sms.Inbox.CONTENT_URI, values) }.getOrNull()
+            dao.setProviderId(row.id, uri?.lastPathSegment?.toLongOrNull())
+            dao.restoreRow(row.id)
+        }
+    }
+    /** Erases a conversation from the Bin for good. */
+    suspend fun purgeFromBin(address: String) = withContext(Dispatchers.IO) {
+        dao.purgeBinned(address)
+        // Nothing left of it: drop its saved settings too, unless the number has live messages again.
+        if (dao.activeCountFor(address) == 0) { dao.deleteDraft(address); dao.deleteConversationPrefs(address) }
+    }
+    suspend fun emptyBin() = withContext(Dispatchers.IO) { dao.purgeAllBinned() }
+    /** Auto-delete: anything that has been in the Bin for more than 30 days. Does nothing when auto-delete is switched off. */
+    suspend fun purgeExpiredBin(): Int = withContext(Dispatchers.IO) {
+        if (!binAutoDelete()) 0 else dao.purgeBinnedBefore(System.currentTimeMillis() - BIN_RETENTION_MILLIS)
     }
     /** Sends a failed message again, in place. */
     suspend fun retrySend(id: Long, deliveryReports: Boolean = false) {

@@ -5,7 +5,7 @@ import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
-@Database(entities = [MessageEntity::class, DraftEntity::class, ScheduledSmsEntity::class, VaultedNumberEntity::class, ConversationPrefsEntity::class], version = 10, exportSchema = true)
+@Database(entities = [MessageEntity::class, DraftEntity::class, ScheduledSmsEntity::class, VaultedNumberEntity::class, ConversationPrefsEntity::class], version = 11, exportSchema = true)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun messageDao(): MessageDao
     companion object {
@@ -77,6 +77,12 @@ abstract class AppDatabase : RoomDatabase() {
         val MIGRATION_9_10 = object : Migration(9, 10) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE messages ADD COLUMN subscriptionId INTEGER")
+            }
+        }
+        /** Bin: conversations deleted from the list are kept (deletedAt set) until restored or purged. */
+        val MIGRATION_10_11 = object : Migration(10, 11) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE messages ADD COLUMN deletedAt INTEGER")
             }
         }
         val MIGRATION_2_3 = object : Migration(2, 3) {

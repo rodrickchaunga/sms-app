@@ -1,5 +1,17 @@
 # SMS App V2.0 — development status
 
+## Phase 4.3 (this delivery): undo send, failed-message options, quick schedule, Bin, settings cards
+
+Not compiled in the authoring environment (no Android SDK): fix the first compiler error first. Room database version is now 11 (migration 10->11: `deletedAt` on `messages`).
+
+1. Settings > Messaging > **Undo send delay** (Off / 3 / 5 / 10 / 15 / 30 s). After tapping send, a bar "Sending in Ns - UNDO" appears above the message box; tapping it stops the send and puts the text back in the box. Leaving the chat during the countdown sends the message straight away.
+2. A message that failed to send shows **See options** (instead of Retry): Retry, Edit (text goes back into the box, failed copy removed), Delete.
+3. **Long-press the send button** to schedule that text for that number (quick choices: in 1 hour, in 3 hours, tomorrow 8:00, or pick a date and time).
+4. The new-conversation button opens the private space only after a **1.2 second hold** (`PRIVATE_SPACE_HOLD_MILLIS` in `ConversationListScreen.kt`). A tap still starts a chat.
+5. **Bin** (conversation-list menu and Settings > Tools): deleting a whole ordinary conversation from the list, archive or chat menu moves it to the Bin. From there: restore, delete permanently, empty bin, and auto-delete after 30 days (switch on the Bin screen; swept on app start, when the Bin opens, and daily by `BinCleanupWorker`). Private conversations are never kept: deleting them erases them, and moving a number to the private space purges any of its messages already in the Bin. Single messages deleted inside an open chat are deleted for good and never reach the Bin.
+6. Unread conversations: sender name and message preview are **bold**.
+7. Settings are grouped into rounded **cards** (Messaging, Notifications, Messages and appearance, Tools, About).
+
 ## Phase 4.2 (this delivery): menu over the message, drafts, delivery ticks
 
 - Long-press menu: the message is redrawn exactly where it was (same position and width) with the actions under it, on the same side; above it when there is no room below. Uses a Popup with the bubble's window bounds, which are recorded per visible bubble (a cheap assignment) and read only on long-press.

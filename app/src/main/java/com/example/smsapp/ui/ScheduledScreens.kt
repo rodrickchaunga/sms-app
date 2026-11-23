@@ -4,7 +4,11 @@ import android.app.DatePickerDialog
 import android.app.TimePickerDialog
 import android.text.format.DateFormat
 import android.widget.Toast
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.material3.AssistChip
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -109,18 +113,26 @@ fun ScheduledMessagesDialog(repo: SmsRepository, onDismiss: () -> Unit) {
     if (creating || editing != null) ScheduleEditorDialog(repo = repo, existing = editing, onDismiss = { creating = false; editing = null })
 }
 
-/** Create (existing == null) or edit/reschedule. Private messages keep their content hidden; only time and SIM can change. */
+/**
+ * Create (existing == null) or edit/reschedule. Private messages keep their content hidden; only time and SIM can change.
+ * [prefillAddress]/[prefillBody] open it ready-filled for one number and one text (long-press on the send button);
+ * the number is then fixed and quick time choices are offered. [onScheduled] runs once the message is saved.
+ */
 @Composable
-fun ScheduleEditorDialog(repo: SmsRepository, existing: ScheduledSmsEntity?, onDismiss: () -> Unit) {
+fun ScheduleEditorDialog(
+    repo: SmsRepository, existing: ScheduledSmsEntity?, onDismiss: () -> Unit,
+    prefillAddress: String? = null, prefillBody: String? = null, prefillSim: Int? = null, onScheduled: () -> Unit = {}
+) {
+    val quick = existing == null && prefillAddress != null
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val isPrivate by produceState<Boolean?>(initialValue = if (existing == null) false else null) {
         value = existing?.let { it.body.startsWith(VAULT_PREFIX) || repo.isVaulted(it.address) } ?: false
     }
-    var recipient by remember { mutableStateOf(existing?.address.orEmpty()) }
-    var message by remember { mutableStateOf(existing?.body.orEmpty()) }
+    var recipient by remember { mutableStateOf(existing?.address ?: prefillAddress.orEmpty()) }
+    var message by remember { mutableStateOf(existing?.body ?: prefillBody.orEmpty()) }
     var sendAt by remember { mutableStateOf(existing?.sendAtMillis?.takeIf { it > System.currentTimeMillis() } ?: (System.currentTimeMillis() + 10 * 60_000L)) }
-    var sim by remember { mutableStateOf(existing?.subscriptionId) }
+    var sim by remember { mutableStateOf(if (existing != null) existing.subscriptionId else prefillSim) }
     var showSimPicker by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     val sims = remember { SimManager.activeSims(context) }
@@ -153,9 +165,16 @@ fun ScheduleEditorDialog(repo: SmsRepository, existing: ScheduledSmsEntity?, onD
                     null -> Text("Checking privacy…")
                     true -> Text("Private conversation: recipient and text stay hidden. You can change the time and SIM.")
                     false -> {
-                        OutlinedTextField(recipient, { recipient = it }, label = { Text("Phone number") }, singleLine = true)
+                        OutlinedTextField(recipient, { recipient = it }, label = { Text("Phone number") }, singleLine = true, enabled = !quick)
                         OutlinedTextField(message, { message = it }, label = { Text("Message") })
                     }
+                }
+                if (quick) Row(Modifier.padding(top = 8.dp).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    AssistChip(onClick = { sendAt = System.currentTimeMillis() + 60 * 60_000L }, label = { Text("In 1 hour") })
+                    AssistChip(onClick = { sendAt = System.currentTimeMillis() + 3 * 60 * 60_000L }, label = { Text("In 3 hours") })
+                    AssistChip(onClick = {
+                        sendAt = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, 1); set(Calendar.HOUR_OF_DAY, 8); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0) }.timeInMillis
+                    }, label = { Text("Tomorrow 8:00") })
                 }
                 Row(Modifier.padding(top = 8.dp)) {
                     OutlinedButton(onClick = { pickDate() }) { Text(java.text.DateFormat.getDateInstance(java.text.DateFormat.MEDIUM).format(java.util.Date(sendAt))) }
@@ -172,7 +191,7 @@ fun ScheduleEditorDialog(repo: SmsRepository, existing: ScheduledSmsEntity?, onD
                         if (existing == null) Scheduler.create(context, recipient, message, sendAt, sim)
                         else if (isPrivate == true) Scheduler.update(context, existing.id, null, null, sendAt, sim)
                         else Scheduler.update(context, existing.id, recipient, message, sendAt, sim)
-                    }.onSuccess { onDismiss() }.onFailure { error = it.message ?: "Could not save" }
+                    }.onSuccess { onScheduled(); onDismiss() }.onFailure { error = it.message ?: "Could not save" }
                 }
             }) { Text(if (existing == null) "Schedule" else "Save") }
         },

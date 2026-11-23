@@ -23,5 +23,7 @@ data class MessageEntity(
     /** Incoming: when this phone received the message (timestamp is the sender's send time). */
     val receivedAt: Long? = null,
     /** The SIM this message arrived on or was sent from (null when unknown, e.g. older messages). */
-    val subscriptionId: Int? = null
+    val subscriptionId: Int? = null,
+    /** Set when a whole (non-private) conversation was deleted from the list: the row waits in the Bin until restored or purged. */
+    val deletedAt: Long? = null
 )

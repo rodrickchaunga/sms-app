@@ -8,6 +8,15 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.onLongClick
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
@@ -50,6 +59,9 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.math.abs
 
+/** How long the new-conversation button must be held to open the private space. */
+private const val PRIVATE_SPACE_HOLD_MILLIS = 1200L
+
 /** Contact name for a number, falling back to the number itself until (or unless) the lookup finds one. */
 @Composable
 fun rememberDisplayName(address: String): String {
@@ -73,6 +85,7 @@ fun ConversationListScreen(
     onNewConversation: () -> Unit,
     onPrivateSpace: () -> Unit,
     onArchived: () -> Unit = {},
+    onBin: () -> Unit = {},
     onSpam: () -> Unit = {},
     onPersonalize: () -> Unit = {},
     onSettings: () -> Unit = {},
@@ -152,6 +165,7 @@ fun ConversationListScreen(
                             DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                                 DropdownMenuItem(text = { Text("Mark all as read") }, onClick = { menuOpen = false; scope.launch { runCatching { repo.markAllRead() } } })
                                 DropdownMenuItem(text = { Text("Archived") }, onClick = { menuOpen = false; onArchived() })
+                                DropdownMenuItem(text = { Text("Bin") }, onClick = { menuOpen = false; onBin() })
                                 DropdownMenuItem(text = { Text("Spam and blocked") }, onClick = { menuOpen = false; onSpam() })
                                 DropdownMenuItem(text = { Text("Personalize") }, onClick = { menuOpen = false; onPersonalize() })
                                 DropdownMenuItem(text = { Text("Settings") }, onClick = { menuOpen = false; onSettings() })
@@ -165,14 +179,32 @@ fun ConversationListScreen(
             if (!selecting) {
                 val haptic = LocalHapticFeedback.current
                 val shape = RoundedCornerShape(20.dp)
+                val currentNew by rememberUpdatedState(onNewConversation)
+                val currentPrivate by rememberUpdatedState(onPrivateSpace)
                 Row(
                     Modifier.height(56.dp).shadow(6.dp, shape).clip(shape)
                         .background(MaterialTheme.colorScheme.primaryContainer)
-                        .combinedClickable(
-                            onClickLabel = "New conversation",
-                            onClick = onNewConversation,
-                            onLongClick = { haptic.performHapticFeedback(HapticFeedbackType.LongPress); onPrivateSpace() }
-                        )
+                        .semantics(mergeDescendants = true) {
+                            role = Role.Button
+                            onClick(label = "New conversation") { currentNew(); true }
+                            onLongClick(label = null) { currentPrivate(); true }
+                        }
+                        // A quick tap starts a chat; holding for PRIVATE_SPACE_HOLD_MILLIS opens the private space.
+                        // (The system long-press fires after about 0.4 s, which is too easy to hit by accident.)
+                        .pointerInput(Unit) {
+                            awaitEachGesture {
+                                awaitFirstDown()
+                                var released = false
+                                val up = withTimeoutOrNull(PRIVATE_SPACE_HOLD_MILLIS) { waitForUpOrCancellation().also { released = true } }
+                                if (!released) {
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    currentPrivate()
+                                    waitForUpOrCancellation()
+                                } else if (up != null) {
+                                    currentNew()
+                                }
+                            }
+                        }
                         .padding(horizontal = 20.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -246,7 +278,7 @@ fun ConversationListScreen(
         AlertDialog(
             onDismissRequest = { pendingSwipeDelete = null },
             title = { Text("Delete conversation?") },
-            text = { Text("This removes it from this app and its SMS provider rows. This cannot be undone.") },
+            text = { Text("It moves to the Bin and is erased for good after 30 days. You can restore it from the Bin until then.") },
             confirmButton = { TextButton(onClick = { pendingSwipeDelete = null; scope.launch { runCatching { repo.deleteConversation(address) } } }) { Text("Delete") } },
             dismissButton = { TextButton(onClick = { pendingSwipeDelete = null }) { Text("Cancel") } }
         )
@@ -256,7 +288,7 @@ fun ConversationListScreen(
         AlertDialog(
             onDismissRequest = { confirmDelete = false },
             title = { Text(if (count == 1) "Delete conversation?" else "Delete $count conversations?") },
-            text = { Text("This removes them from this app and their SMS provider rows. This cannot be undone.") },
+            text = { Text("They move to the Bin and are erased for good after 30 days. You can restore them from the Bin until then.") },
             confirmButton = {
                 TextButton(onClick = {
                     val targets = selected
@@ -302,13 +334,13 @@ fun ContactListItem(
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 displayName, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 16.sp,
-                fontWeight = if (unread > 0) FontWeight.SemiBold else FontWeight.Medium
+                fontWeight = if (unread > 0) FontWeight.Bold else FontWeight.Medium
             )
             Spacer(modifier = Modifier.height(2.dp))
             Text(
                 preview, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 14.sp,
                 color = if (unread > 0) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
-                fontWeight = if (unread > 0) FontWeight.Medium else FontWeight.Normal
+                fontWeight = if (unread > 0) FontWeight.Bold else FontWeight.Normal
             )
         }
 

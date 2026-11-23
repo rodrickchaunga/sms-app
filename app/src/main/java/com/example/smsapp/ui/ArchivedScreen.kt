@@ -71,7 +71,7 @@ fun ArchivedScreen(repo: SmsRepository, onBack: () -> Unit, onOpen: (String) -> 
     if (confirmDelete) AlertDialog(
         onDismissRequest = { confirmDelete = false },
         title = { Text(if (selected.size == 1) "Delete conversation?" else "Delete ${selected.size} conversations?") },
-        text = { Text("This removes them from this app and their SMS provider rows. This cannot be undone.") },
+        text = { Text("They move to the Bin and are erased for good after 30 days. You can restore them from the Bin until then.") },
         confirmButton = {
             TextButton(onClick = {
                 val targets = selected

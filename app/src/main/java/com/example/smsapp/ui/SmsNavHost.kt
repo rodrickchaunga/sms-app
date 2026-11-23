@@ -37,6 +37,7 @@ fun SmsNavHost(repo: SmsRepository, launch: LaunchRequest?) {
     var inPrivateSpace by remember { mutableStateOf(false) }
     var showNewConversation by remember { mutableStateOf(false) }
     var showArchived by remember { mutableStateOf(false) }
+    var showBin by remember { mutableStateOf(false) }
     // Lives here (not inside the list screen) so the list is where you left it after opening a chat and pressing back.
     val conversationListState = rememberLazyListState()
     var showSpam by remember { mutableStateOf(false) }
@@ -164,6 +165,8 @@ fun SmsNavHost(repo: SmsRepository, launch: LaunchRequest?) {
             onDelete = { scope.launch { repo.deleteConversation(openChat); closeChat() } })
     } else if (showNewConversation) {
         NewConversationScreen(onBack = { showNewConversation = false }, onChoose = ::openAddress)
+    } else if (showBin) {
+        BinScreen(repo, onBack = { showBin = false })
     } else if (showArchived) {
         ArchivedScreen(repo, onBack = { showArchived = false }, onOpen = ::openAddress)
     } else if (inPrivateSpace) {
@@ -177,11 +180,11 @@ fun SmsNavHost(repo: SmsRepository, launch: LaunchRequest?) {
         PersonalizeScreen(onBack = { showPersonalize = false })
     } else if (showSettings) {
         BackHandler { showSettings = false }
-        SettingsScreen(repo = repo, onOpenConversation = ::openAddress, onOpenPersonalize = { showPersonalize = true }, onOpenArchived = { showArchived = true }, onBack = { showSettings = false })
+        SettingsScreen(repo = repo, onOpenConversation = ::openAddress, onOpenPersonalize = { showPersonalize = true }, onOpenArchived = { showArchived = true }, onOpenBin = { showBin = true }, onBack = { showSettings = false })
     } else {
         ConversationListScreen(
             repo, onOpen = ::openAddress, onNewConversation = { showNewConversation = true }, onPrivateSpace = ::requestPrivateSpace,
-            onArchived = { showArchived = true }, onSpam = { showSpam = true }, onPersonalize = { showPersonalize = true }, onSettings = { showSettings = true },
+            onArchived = { showArchived = true }, onBin = { showBin = true }, onSpam = { showSpam = true }, onPersonalize = { showPersonalize = true }, onSettings = { showSettings = true },
             listState = conversationListState
         )
     }

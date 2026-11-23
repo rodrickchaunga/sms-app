@@ -36,6 +36,10 @@ import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Send
@@ -94,6 +98,17 @@ fun ConversationScreen(repo: SmsRepository, address: String, privateMode: Boolea
     val context = LocalContext.current
     val deliveryReports = remember { contextPrefs(context).getBoolean("delivery_reports", false) }
     var sendError by remember { mutableStateOf<String?>(null) }
+    // Undo send: the message waits [sendDelaySecs] seconds (Settings) before it really goes, and can be taken back into the box.
+    val sendDelaySecs = remember { contextPrefs(context).getInt("send_delay_secs", 0) }
+    var pendingBody by remember { mutableStateOf<String?>(null) }
+    var pendingLeft by remember { mutableIntStateOf(0) }
+    val sendProgress = remember { androidx.compose.animation.core.Animatable(0f) }
+    var pendingJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+    // Long-press on the send button: schedule this text for this number.
+    var showQuickSchedule by remember { mutableStateOf(false) }
+    var scheduleBody by remember { mutableStateOf("") }
+    // A message that failed to send: "See options" opens Retry / Edit / Delete.
+    var optionsMessage by remember { mutableStateOf<MessageEntity?>(null) }
     var menuExpanded by remember { mutableStateOf(false) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
     var forwardNumber by remember { mutableStateOf("") }
@@ -249,6 +264,43 @@ fun ConversationScreen(repo: SmsRepository, address: String, privateMode: Boolea
     }
     fun callNumber() { runCatching { context.startActivity(Intent(Intent.ACTION_DIAL, Uri.fromParts("tel", address, null))) } }
     fun toggleSelected(id: Long) { selectedIds = if (id in selectedIds) selectedIds - id else selectedIds + id }
+    fun deliver(body: String) {
+        scope.launch { runCatching { repo.send(address, body, deliveryReports); repo.saveDraft(address, "") }.onFailure { sendError = it.message ?: "Unable to send SMS"; if (draft.isBlank()) draft = body } }
+    }
+    fun startSend() {
+        val body = draft
+        if (body.isBlank()) return
+        // Sending again while an earlier message is still counting down: the earlier one goes now.
+        pendingJob?.cancel(); pendingJob = null
+        pendingBody?.let { earlier -> pendingBody = null; deliver(earlier) }
+        draft = ""
+        if (sendDelaySecs <= 0) { deliver(body); return }
+        pendingBody = body
+        pendingJob = scope.launch {
+            // The ring around the stop square fills clockwise over exactly the chosen delay.
+            launch { sendProgress.snapTo(0f); sendProgress.animateTo(1f, androidx.compose.animation.core.tween(sendDelaySecs * 1000, easing = androidx.compose.animation.core.LinearEasing)) }
+            for (left in sendDelaySecs downTo 1) { pendingLeft = left; kotlinx.coroutines.delay(1000) }
+            val ready = pendingBody
+            pendingBody = null; pendingJob = null
+            if (ready != null) deliver(ready)
+        }
+    }
+    fun undoSend() {
+        pendingJob?.cancel(); pendingJob = null
+        val body = pendingBody ?: return
+        pendingBody = null
+        draft = if (draft.isBlank()) body else body + "\n" + draft
+    }
+    // Leaving the chat during the countdown sends the message straight away rather than losing it.
+    DisposableEffect(Unit) {
+        onDispose {
+            val waiting = pendingBody
+            if (waiting != null) {
+                pendingJob?.cancel()
+                kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch { runCatching { repo.send(address, waiting, deliveryReports); repo.saveDraft(address, "") } }
+            }
+        }
+    }
 
     BackHandler(enabled = showDetails) { showDetails = false }
     BackHandler(enabled = infoMessage != null) { infoMessage = null }
@@ -367,8 +419,34 @@ fun ConversationScreen(repo: SmsRepository, address: String, privateMode: Boolea
                     !simName.isNullOrBlank() -> "$simName • Text message"
                     else -> "Text message"
                 }
+                Column(Modifier.background(chatBackgroundColor(look))) {
+                if (pendingBody != null) Surface(
+                    color = MaterialTheme.colorScheme.secondaryContainer,
+                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 6.dp).clickable(onClickLabel = "Undo send", onClick = ::undoSend)
+                ) {
+                    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp)) {
+                        Text("Sending in ${pendingLeft}s", fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSecondaryContainer)
+                        Text(pendingBody.orEmpty().replace('\n', ' '), maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSecondaryContainer)
+                        // Under the text: a stop square inside a ring that fills clockwise over the delay. Tap to undo.
+                        Row(Modifier.padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Box(Modifier.size(40.dp), contentAlignment = Alignment.Center) {
+                                CircularProgressIndicator(
+                                    progress = { sendProgress.value },
+                                    modifier = Modifier.fillMaxSize(),
+                                    strokeWidth = 3.dp,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    trackColor = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.15f)
+                                )
+                                Box(Modifier.size(14.dp).clip(RoundedCornerShape(3.dp)).background(MaterialTheme.colorScheme.primary))
+                            }
+                            Spacer(Modifier.width(12.dp))
+                            Text("Tap to undo", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                        }
+                    }
+                }
                 Row(
-                    Modifier.fillMaxWidth().background(chatBackgroundColor(look)).padding(horizontal = 8.dp, vertical = 8.dp),
+                    Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     IconButton(onClick = {}, enabled = false) {
@@ -403,18 +481,28 @@ fun ConversationScreen(repo: SmsRepository, address: String, privateMode: Boolea
                     }
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         counter?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                        FilledIconButton(
-                            enabled = canReply && draft.isNotBlank(),
-                            colors = IconButtonDefaults.filledIconButtonColors(containerColor = MaterialTheme.colorScheme.primary, contentColor = MaterialTheme.colorScheme.onPrimary),
-                            onClick = {
-                                val body = draft
-                                draft = ""
-                                scope.launch { runCatching { repo.send(address, body, deliveryReports); repo.saveDraft(address, "") }.onFailure { sendError = it.message ?: "Unable to send SMS"; draft = body } }
-                            }
+                        // Tap sends; a long press schedules this text for this number.
+                        val sendEnabled = canReply && draft.isNotBlank()
+                        val haptic = LocalHapticFeedback.current
+                        Box(
+                            Modifier.size(40.dp).clip(CircleShape)
+                                .background(if (sendEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f))
+                                .combinedClickable(
+                                    enabled = sendEnabled,
+                                    onClickLabel = "Send",
+                                    onLongClickLabel = "Schedule message",
+                                    onClick = { startSend() },
+                                    onLongClick = { haptic.performHapticFeedback(HapticFeedbackType.LongPress); scheduleBody = draft; showQuickSchedule = true }
+                                ),
+                            contentAlignment = Alignment.Center
                         ) {
-                            Icon(Icons.Default.Send, contentDescription = "Send")
+                            Icon(
+                                Icons.Default.Send, contentDescription = "Send. Long press to schedule",
+                                tint = if (sendEnabled) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                            )
                         }
                     }
+                }
                 }
                 }
             }
@@ -542,9 +630,9 @@ fun ConversationScreen(repo: SmsRepository, address: String, privateMode: Boolea
                                     color = if (failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                                 if (failed) Text(
-                                    "  Retry", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Medium,
+                                    "  See options", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Medium,
                                     color = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.clickable { retry(m.id) }.padding(vertical = 4.dp)
+                                    modifier = Modifier.clickable { optionsMessage = m }.padding(vertical = 4.dp)
                                 )
                             }
                         }
@@ -593,6 +681,34 @@ fun ConversationScreen(repo: SmsRepository, address: String, privateMode: Boolea
             onInfo = { infoMessage = live; menuMessage = null }
         )
     }
+    if (showQuickSchedule) ScheduleEditorDialog(
+        repo = repo, existing = null, prefillAddress = address, prefillBody = scheduleBody,
+        onScheduled = {
+            if (draft == scheduleBody) draft = ""
+            Toast.makeText(context, "Message scheduled", Toast.LENGTH_SHORT).show()
+        },
+        onDismiss = { showQuickSchedule = false }
+    )
+    optionsMessage?.let { target ->
+        AlertDialog(
+            onDismissRequest = { optionsMessage = null },
+            title = { Text("Message not sent") },
+            text = {
+                Column {
+                    Text(target.body, maxLines = 3, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(bottom = 8.dp))
+                    FailedOptionRow(Icons.Default.Refresh, "Retry") { optionsMessage = null; retry(target.id) }
+                    FailedOptionRow(Icons.Default.Edit, "Edit") {
+                        optionsMessage = null
+                        // The text goes back into the box to change and send again; the failed copy is removed.
+                        draft = if (draft.isBlank()) target.body else target.body + "\n" + draft
+                        scope.launch { runCatching { repo.deleteMessage(target.id) } }
+                    }
+                    FailedOptionRow(Icons.Default.Delete, "Delete") { optionsMessage = null; scope.launch { runCatching { repo.deleteMessage(target.id) } } }
+                }
+            },
+            confirmButton = { TextButton(onClick = { optionsMessage = null }) { Text("Cancel") } }
+        )
+    }
     if (showReplyHelp) AlertDialog(
         onDismissRequest = { showReplyHelp = false },
         text = { Text("Short codes are local or personalized numbers for sending international SMS messages.\n\nYou can reply to numbers-only short codes, but not to codes with letters and numbers, like “MSG007.”") },
@@ -627,7 +743,7 @@ fun ConversationScreen(repo: SmsRepository, address: String, privateMode: Boolea
     if (showDeleteConfirm) AlertDialog(
         onDismissRequest = { showDeleteConfirm = false },
         title = { Text("Delete conversation?") },
-        text = { Text("This removes the conversation from this app and, for non-private conversations, its SMS provider rows. This cannot be undone.") },
+        text = { Text(if (privateMode) "All messages in this private conversation are erased and cannot be recovered." else "The conversation moves to the Bin and is erased for good after 30 days. You can restore it from the Bin until then.") },
         confirmButton = { TextButton(onClick = { showDeleteConfirm = false; onDelete() }) { Text("Delete") } },
         dismissButton = { TextButton(onClick = { showDeleteConfirm = false }) { Text("Cancel") } }
     )
@@ -651,6 +767,15 @@ private data class MessageRow(val m: MessageEntity) : ChatRow { override val key
 private data class DateRow(val text: String, val id: Long) : ChatRow { override val key: String get() = "d$id" }
 private object UnreadRow : ChatRow { override val key: String = "unread" }
 private data class IntroRow(val name: String, val simName: String?) : ChatRow { override val key: String get() = "intro" }
+
+@Composable
+private fun FailedOptionRow(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, onClick: () -> Unit) {
+    Row(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+        Icon(icon, contentDescription = null, tint = if (label == "Delete") MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface)
+        Spacer(Modifier.width(20.dp))
+        Text(label, color = if (label == "Delete") MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface)
+    }
+}
 
 @Composable
 private fun DateHeader(text: String) {

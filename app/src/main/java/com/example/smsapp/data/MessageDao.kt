@@ -9,6 +9,10 @@ import kotlinx.coroutines.flow.Flow
 @Dao
 interface MessageDao {
     @Insert(onConflict = OnConflictStrategy.IGNORE) suspend fun insert(m: MessageEntity): Long
+    /** One transaction for the whole list: much faster than a write per message. */
+    @Insert(onConflict = OnConflictStrategy.IGNORE) suspend fun insertAll(items: List<MessageEntity>)
+    @Query("SELECT providerId FROM messages WHERE providerId IS NOT NULL") suspend fun allProviderIds(): List<Long>
+    @Query("SELECT address, body, timestamp, outgoing FROM messages") suspend fun messageKeys(): List<MessageKey>
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun saveDraft(draft: DraftEntity)
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun insertScheduled(item: ScheduledSmsEntity)
     @Query("SELECT * FROM scheduled_sms ORDER BY CASE WHEN status IN ('pending','sending') THEN 0 ELSE 1 END, sendAtMillis ASC") fun scheduledMessages(): Flow<List<ScheduledSmsEntity>>
@@ -104,3 +108,6 @@ data class BinItem(val address: String, val body: String?, val messageCount: Int
 
 /** [lastOutgoing] is true when the newest message in the conversation was sent by this user (the list shows "You: ..."). */
 data class ConversationPreview(val address: String, val body: String, val timestamp: Long, val unread: Int = 0, val isPinned: Boolean = false, val lastOutgoing: Boolean = false, val lastStatus: String = "", val draft: String? = null)
+
+/** Just enough of a message to recognise it as already imported. */
+data class MessageKey(val address: String, val body: String, val timestamp: Long, val outgoing: Boolean)

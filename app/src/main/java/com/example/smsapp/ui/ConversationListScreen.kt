@@ -101,6 +101,8 @@ fun ConversationListScreen(
     val listFlow = remember(searchQuery) { if (searchQuery.isBlank()) repo.conversations else repo.search(searchQuery) }
     val loadedList: List<ConversationPreview>? by listFlow.collectAsState(initial = null as List<ConversationPreview>?)
     val list = loadedList ?: emptyList()
+    // First-time import of the phone's existing messages: (done, total), or null when idle.
+    val importing by repo.importProgress.collectAsState()
     // Search results get their own scroll state; the hoisted one belongs to the full list.
     val searchListState = rememberLazyListState()
     val activeListState = if (searchQuery.isBlank()) listState else searchListState
@@ -220,7 +222,15 @@ fun ConversationListScreen(
             return@Scaffold
         }
         LazyColumn(Modifier.padding(pad).fillMaxSize().roundedTop().background(MaterialTheme.colorScheme.background), state = activeListState) {
-            if (list.isEmpty()) {
+            importing?.let { (done, total) ->
+                item(key = "import-progress") {
+                    Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 12.dp)) {
+                        Text("Importing messages… ${"%,d".format(done)} of ${"%,d".format(total)}", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        LinearProgressIndicator(progress = { if (total > 0) done / total.toFloat() else 0f }, modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
+                    }
+                }
+            }
+            if (list.isEmpty() && importing == null) {
                 item {
                     Text(
                         if (searchQuery.isBlank()) "No messages yet. Tap Start chat to begin." else "No matching messages.",

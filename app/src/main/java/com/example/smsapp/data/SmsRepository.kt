@@ -16,6 +16,8 @@ import com.example.smsapp.notify.NotificationHelper
 /** [address] is the thread the message was stored under (for a private number this is the address it was saved with). */
 data class IngestResult(val id: Long, val vaulted: Boolean, val blocked: Boolean, val address: String)
 
+private const val IMPORT_BATCH = 500
+
 const val BIN_RETENTION_MILLIS = 30L * 24 * 60 * 60 * 1000
 
 class SmsRepository(private val context: Context, private val dao: MessageDao) {
@@ -362,34 +364,68 @@ class SmsRepository(private val context: Context, private val dao: MessageDao) {
     suspend fun archive(address: String, value: Boolean) = dao.setArchived(address, value)
     suspend fun block(address: String, value: Boolean) = dao.setSpam(address, value)
 
-    /** Imports existing provider rows. Call only after READ_SMS permission and default-role grant. */
+    /** (imported so far, total) while the first-time import runs; null otherwise. The conversation list shows it. */
+    private val _importProgress = kotlinx.coroutines.flow.MutableStateFlow<Pair<Int, Int>?>(null)
+    val importProgress: kotlinx.coroutines.flow.StateFlow<Pair<Int, Int>?> = _importProgress
+    private val importLock = kotlinx.coroutines.sync.Mutex()
+
+    /**
+     * Imports existing provider rows. Call only after READ_SMS permission and default-role grant.
+     * Newest messages first, so recent chats appear straight away; saved in batches (one transaction each) instead of one write
+     * per message; messages already imported are recognised from sets loaded once, not by a query per message.
+     */
     suspend fun syncProviderMessages() = withContext(Dispatchers.IO) {
-        val uri = Telephony.Sms.CONTENT_URI
-        val projection = arrayOf(Telephony.Sms._ID, Telephony.Sms.ADDRESS, Telephony.Sms.BODY, Telephony.Sms.DATE, Telephony.Sms.TYPE, Telephony.Sms.READ)
-        context.contentResolver.query(uri, projection, null, null, "${Telephony.Sms.DATE} ASC")?.use { c ->
-            val idCol = c.getColumnIndexOrThrow(Telephony.Sms._ID)
-            val addressCol = c.getColumnIndexOrThrow(Telephony.Sms.ADDRESS)
-            val bodyCol = c.getColumnIndexOrThrow(Telephony.Sms.BODY)
-            val dateCol = c.getColumnIndexOrThrow(Telephony.Sms.DATE)
-            val typeCol = c.getColumnIndexOrThrow(Telephony.Sms.TYPE)
-            val readCol = c.getColumnIndexOrThrow(Telephony.Sms.READ)
-            while (c.moveToNext()) {
-                val id = c.getLong(idCol)
-                if (dao.byProviderId(id) == null) {
-                    val address = c.getString(addressCol) ?: "Unknown"
-                    val body = c.getString(bodyCol) ?: ""
-                    val timestamp = c.getLong(dateCol)
-                    // A vaulted thread must never be re-imported from the shared provider.
-                    if (!isVaulted(address)) {
-                        val type = c.getInt(typeCol)
-                        val outgoing = type == Telephony.Sms.MESSAGE_TYPE_SENT || type == Telephony.Sms.MESSAGE_TYPE_OUTBOX
-                        val blocked = isBlocked(address)
-                        if (!dao.duplicateMessage(address, body, timestamp, outgoing)) {
-                            dao.insert(MessageEntity(address = address, body = body, timestamp = timestamp, outgoing = outgoing, isSpam = blocked, providerId = if (blocked) null else id, status = "synced", isRead = outgoing || blocked || c.getInt(readCol) == 1))
+        // Two overlapping syncs (e.g. the screen is recreated mid-import) would both try to insert the same rows.
+        if (!importLock.tryLock()) return@withContext
+        try {
+            val knownProviderIds = HashSet<Long>(dao.allProviderIds())
+            val knownKeys = HashSet<String>().apply { dao.messageKeys().forEach { add(importKey(it.address, it.timestamp, it.outgoing, it.body)) } }
+            // Per-number answers, so the (comparatively slow) vault/blocked checks run once per number and not once per message.
+            val vaultedCache = HashMap<String, Boolean>()
+            val blockedCache = HashMap<String, Boolean>()
+            val projection = arrayOf(Telephony.Sms._ID, Telephony.Sms.ADDRESS, Telephony.Sms.BODY, Telephony.Sms.DATE, Telephony.Sms.TYPE, Telephony.Sms.READ)
+            context.contentResolver.query(Telephony.Sms.CONTENT_URI, projection, null, null, "${Telephony.Sms.DATE} DESC")?.use { c ->
+                val total = c.count
+                val idCol = c.getColumnIndexOrThrow(Telephony.Sms._ID)
+                val addressCol = c.getColumnIndexOrThrow(Telephony.Sms.ADDRESS)
+                val bodyCol = c.getColumnIndexOrThrow(Telephony.Sms.BODY)
+                val dateCol = c.getColumnIndexOrThrow(Telephony.Sms.DATE)
+                val typeCol = c.getColumnIndexOrThrow(Telephony.Sms.TYPE)
+                val readCol = c.getColumnIndexOrThrow(Telephony.Sms.READ)
+                val batch = ArrayList<MessageEntity>(IMPORT_BATCH)
+                var seen = 0
+                // Only show progress when there is real work to do, so a normal launch never flashes it.
+                var showProgress = false
+                suspend fun flush() {
+                    if (batch.isNotEmpty()) { dao.insertAll(batch.toList()); batch.clear() }
+                    if (showProgress) _importProgress.value = seen to total
+                }
+                while (c.moveToNext()) {
+                    seen++
+                    val id = c.getLong(idCol)
+                    if (id !in knownProviderIds) {
+                        val address = c.getString(addressCol) ?: "Unknown"
+                        // A vaulted thread must never be re-imported from the shared provider.
+                        if (!vaultedCache.getOrPut(address) { isVaulted(address) }) {
+                            val body = c.getString(bodyCol) ?: ""
+                            val timestamp = c.getLong(dateCol)
+                            val type = c.getInt(typeCol)
+                            val outgoing = type == Telephony.Sms.MESSAGE_TYPE_SENT || type == Telephony.Sms.MESSAGE_TYPE_OUTBOX
+                            if (knownKeys.add(importKey(address, timestamp, outgoing, body))) {
+                                val blocked = blockedCache.getOrPut(address) { isBlocked(address) }
+                                batch.add(MessageEntity(address = address, body = body, timestamp = timestamp, outgoing = outgoing, isSpam = blocked, providerId = if (blocked) null else id, status = "synced", isRead = outgoing || blocked || c.getInt(readCol) == 1))
+                                if (batch.size >= IMPORT_BATCH) { showProgress = true; flush() }
+                            }
                         }
                     }
                 }
+                flush()
             }
+        } finally {
+            _importProgress.value = null
+            importLock.unlock()
         }
     }
+
+    private fun importKey(address: String, timestamp: Long, outgoing: Boolean, body: String) = "$address|$timestamp|$outgoing|${body.length}|${body.hashCode()}"
 }

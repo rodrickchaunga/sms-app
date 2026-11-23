@@ -533,7 +533,6 @@ fun ConversationScreen(repo: SmsRepository, address: String, privateMode: Boolea
                                 .semantics { customActions = listOf(CustomAccessibilityAction("Withdraw message") { undoSend(); true }) }
                                 .combinedClickable(
                                     onClick = {},
-                                    onDoubleClickLabel = "Withdraw message",
                                     onDoubleClick = { undoSend() }
                                 ),
                             color = bubbleBg,

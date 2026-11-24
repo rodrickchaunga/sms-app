@@ -13,7 +13,10 @@ import javax.crypto.spec.GCMParameterSpec
 object VaultCrypto {
     private const val STORE = "AndroidKeyStore"
     private const val ALIAS = "sms_private_messages_v1"
-    private fun key(): SecretKey {
+    // Looking the key up in the Keystore is slow, and it used to happen for every single message. The handle is safe to reuse.
+    @Volatile private var cachedKey: SecretKey? = null
+    private fun key(): SecretKey = cachedKey ?: synchronized(this) { cachedKey ?: loadKey().also { cachedKey = it } }
+    private fun loadKey(): SecretKey {
         val store = KeyStore.getInstance(STORE).apply { load(null) }
         (store.getKey(ALIAS, null) as? SecretKey)?.let { return it }
         val generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, STORE)

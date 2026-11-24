@@ -7,6 +7,8 @@ import android.net.Uri
 import android.provider.Telephony
 import android.telephony.PhoneNumberUtils
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
@@ -28,10 +30,20 @@ class SmsRepository(private val context: Context, private val dao: MessageDao) {
     fun search(query: String): Flow<List<ConversationPreview>> =
         dao.searchConversations(query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_"))
     fun thread(addr: String): Flow<List<MessageEntity>> = dao.thread(addr)
-    fun privateThread(addr: String): Flow<List<MessageEntity>> = dao.privateThread(addr).map { rows -> rows.map { it.copy(body = runCatching { VaultCrypto.decrypt(it.body) }.getOrDefault("[Unable to decrypt private message]")) } }
+    // Decrypting used to run on the main thread (a Flow's map runs where it is collected), for every message, on every database change.
+    // Now: off the main thread, and each message is decrypted once while the chat is open (the cache dies with the collection).
+    fun privateThread(addr: String): Flow<List<MessageEntity>> = kotlinx.coroutines.flow.flow {
+        val plain = HashMap<String, String>()
+        emitAll(dao.privateThread(addr).map { rows ->
+            rows.map { row -> row.copy(body = plain.getOrPut(row.body) { runCatching { VaultCrypto.decrypt(row.body) }.getOrDefault("[Unable to decrypt private message]") }) }
+        })
+    }.flowOn(Dispatchers.Default)
     fun archivedConversations(): Flow<List<ConversationPreview>> = dao.archivedConversations()
     fun starred(): Flow<List<MessageEntity>> = dao.starred()
-    fun privateConversations(): Flow<List<ConversationPreview>> = dao.privateConversations().map { rows -> rows.map { it.copy(body = runCatching { VaultCrypto.decrypt(it.body) }.getOrDefault("")) } }
+    fun privateConversations(): Flow<List<ConversationPreview>> = kotlinx.coroutines.flow.flow {
+        val plain = HashMap<String, String>()
+        emitAll(dao.privateConversations().map { rows -> rows.map { row -> row.copy(body = plain.getOrPut(row.body) { runCatching { VaultCrypto.decrypt(row.body) }.getOrDefault("") }) } })
+    }.flowOn(Dispatchers.Default)
     fun spam(): Flow<List<MessageEntity>> = dao.spam()
     fun scheduledMessages(): Flow<List<ScheduledSmsEntity>> = dao.scheduledMessages()
 

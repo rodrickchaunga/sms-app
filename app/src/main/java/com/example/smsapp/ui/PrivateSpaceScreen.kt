@@ -26,6 +26,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.example.smsapp.data.SmsRepository
+import com.example.smsapp.data.getContactName
 import com.example.smsapp.notify.NotificationHelper
 import com.example.smsapp.security.VaultSecurity
 import kotlinx.coroutines.Dispatchers
@@ -174,15 +175,34 @@ fun PrivateSpaceScreen(repo: SmsRepository, security: VaultSecurity, onOpen: (St
     )
     if (addStep == 2) {
         val existing by repo.conversations.collectAsState(initial = emptyList())
+        var query by remember { mutableStateOf("") }
+        // Contact names are looked up in the background; until a name arrives the number is shown (and searched).
+        val names = remember { mutableStateMapOf<String, String>() }
+        LaunchedEffect(existing) {
+            withContext(Dispatchers.IO) {
+                existing.forEach { c -> if (c.address !in names) getContactName(context, c.address)?.let { names[c.address] = it } }
+            }
+        }
+        val q = query.trim()
+        val shown = if (q.isEmpty()) existing else existing.filter { c ->
+            c.address.contains(q, true) || (names[c.address]?.contains(q, true) == true) || c.body.contains(q, true)
+        }
         AlertDialog(
             onDismissRequest = { addStep = 0 },
             title = { Text("Move a conversation") },
             text = {
-                if (existing.isEmpty()) Text("No conversations to move.")
-                else LazyColumn(Modifier.heightIn(max = 360.dp)) {
-                    items(existing, key = { it.address }) { c ->
-                        val name = rememberDisplayName(c.address)
-                        ListItem(headlineContent = { Text(name) }, supportingContent = { Text(c.body, maxLines = 1) }, colors = getTransparentColors(), modifier = Modifier.clickable { addPrivate(c.address) })
+                Column {
+                    OutlinedTextField(
+                        query, { query = it }, Modifier.fillMaxWidth(),
+                        label = { Text("Search name, number or message") }, singleLine = true
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    if (existing.isEmpty()) Text("No conversations to move.")
+                    else if (shown.isEmpty()) Text("No matching conversations.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    else LazyColumn(Modifier.heightIn(max = 320.dp)) {
+                        items(shown, key = { it.address }) { c ->
+                            ListItem(headlineContent = { Text(names[c.address] ?: c.address) }, supportingContent = { Text(c.body, maxLines = 1) }, colors = getTransparentColors(), modifier = Modifier.clickable { addPrivate(c.address) })
+                        }
                     }
                 }
             },

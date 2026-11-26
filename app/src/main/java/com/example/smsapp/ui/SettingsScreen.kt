@@ -43,6 +43,7 @@ fun SettingsScreen(repo: SmsRepository, onOpenConversation: (String) -> Unit, on
     val prefs = remember { context.getSharedPreferences("sms_settings", Context.MODE_PRIVATE) }
     var deliveryReports by remember { mutableStateOf(prefs.getBoolean("delivery_reports", false)) }
     var lockPreviews by remember { mutableStateOf(prefs.getBoolean("lock_screen_previews", false)) }
+    var wakeScreen by remember { mutableStateOf(prefs.getBoolean(com.example.smsapp.notify.NotificationHelper.WAKE_SCREEN_KEY, false)) }
     var notificationsAllowed by remember { mutableStateOf(com.example.smsapp.notify.NotificationHelper.canNotify(context)) }
     val notifSettingsIntent = remember { Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, context.packageName) }
     val notifPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
@@ -129,6 +130,7 @@ fun SettingsScreen(repo: SmsRepository, onOpenConversation: (String) -> Unit, on
                     }) { Text(if (notificationsAllowed) "Channels" else "Allow") }
                 })
                 ListItem(colors = tc, headlineContent = { Text("Show previews on lock screen") }, supportingContent = { Text("Show message text in notifications on the lock screen") }, trailingContent = { Switch(lockPreviews, { lockPreviews = it; prefs.edit().putBoolean("lock_screen_previews", it).apply() }) })
+                ListItem(colors = tc, headlineContent = { Text("Wake screen for new messages") }, supportingContent = { Text("Turn the screen on when a message arrives while it is off") }, trailingContent = { Switch(wakeScreen, { wakeScreen = it; prefs.edit().putBoolean(com.example.smsapp.notify.NotificationHelper.WAKE_SCREEN_KEY, it).apply() }) })
                 ListItem(colors = tc, headlineContent = { Text("Notification sound and vibration") }, supportingContent = { Text("Applies to all conversations without their own setting") })
                 NotificationAlertControls(
                     sound = alertSound, vibration = alertVibration, allowDefault = false,

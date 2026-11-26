@@ -168,6 +168,22 @@ object NotificationHelper {
             .setContentText("Unlock to read")
             .build()
 
+    const val WAKE_SCREEN_KEY = "wake_screen"
+
+    /** Turns the screen on for a few seconds if it is off; it then goes back to sleep after the normal screen timeout. */
+    private fun wakeScreen(context: Context) {
+        val power = context.getSystemService(android.os.PowerManager::class.java) ?: return
+        if (power.isInteractive) return
+        runCatching {
+            @Suppress("DEPRECATION")
+            val lock = power.newWakeLock(
+                android.os.PowerManager.SCREEN_BRIGHT_WAKE_LOCK or android.os.PowerManager.ACQUIRE_CAUSES_WAKEUP or android.os.PowerManager.ON_AFTER_RELEASE,
+                "smsapp:wake-for-message"
+            )
+            lock.acquire(5_000L) // releases itself
+        }
+    }
+
     fun showIncoming(context: Context, address: String, body: String, timestamp: Long, vaulted: Boolean, convPrefs: ConversationPrefsEntity? = null) {
         if (!canNotify(context)) return
         val app = context.applicationContext
@@ -175,6 +191,8 @@ object NotificationHelper {
         val prefs = settings(app)
         // Private messages: one setting, kept inside the private space ("generic" is the default, "off" posts nothing).
         if (vaulted && prefs.getString(PRIVATE_NOTIFICATIONS_KEY, "generic") == "off") return
+        // Settings > "Wake screen for new messages". Only for messages that actually produce a notification (not muted, not "off").
+        if (prefs.getBoolean(WAKE_SCREEN_KEY, false)) wakeScreen(app)
         val showOnLockScreen = prefs.getBoolean("lock_screen_previews", false)
         val privacy = prefs.getString("notification_privacy", "full") ?: "full"
 

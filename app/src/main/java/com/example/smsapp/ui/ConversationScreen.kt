@@ -41,6 +41,9 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.SelectAll
@@ -112,6 +115,10 @@ fun ConversationScreen(repo: SmsRepository, address: String, privateMode: Boolea
     // A message that failed to send: "See options" opens Retry / Edit / Delete.
     var optionsMessage by remember { mutableStateOf<MessageEntity?>(null) }
     var menuExpanded by remember { mutableStateOf(false) }
+    // Search inside this conversation.
+    var searching by remember { mutableStateOf(false) }
+    var searchQuery by remember { mutableStateOf("") }
+    var matchPos by remember { mutableStateOf(0) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
     var forwardNumber by remember { mutableStateOf("") }
     var lastSelectedMessageId by remember { mutableStateOf<Long?>(null) }
@@ -243,6 +250,18 @@ fun ConversationScreen(repo: SmsRepository, address: String, privateMode: Boolea
             }
         }.asReversed()
     }
+    val activeQuery = if (searching) searchQuery.trim() else ""
+    // Matching messages, oldest first. The search starts on the newest match; the arrows step to older / newer ones.
+    val matches = remember(msgs, activeQuery) {
+        if (activeQuery.isEmpty()) emptyList() else msgs.filter { it.body.contains(activeQuery, ignoreCase = true) }.map { it.id }
+    }
+    val currentMatchId = matches.getOrNull(matchPos.coerceIn(0, (matches.size - 1).coerceAtLeast(0)))
+    fun stepMatch(older: Boolean) {
+        if (matches.isEmpty()) return
+        val cur = matchPos.coerceIn(0, matches.lastIndex)
+        matchPos = if (older) (if (cur > 0) cur - 1 else matches.lastIndex) else (if (cur < matches.lastIndex) cur + 1 else 0)
+    }
+    fun closeSearch() { searching = false; searchQuery = "" }
     fun addContact() {
         runCatching {
             context.startActivity(Intent(ContactsContract.Intents.Insert.ACTION).apply {
@@ -306,6 +325,7 @@ fun ConversationScreen(repo: SmsRepository, address: String, privateMode: Boolea
     BackHandler(enabled = showDetails) { showDetails = false }
     BackHandler(enabled = infoMessage != null) { infoMessage = null }
     BackHandler(enabled = selecting && !showDetails) { selectedIds = emptySet() }
+    BackHandler(enabled = searching && !selecting && !showDetails) { closeSearch() }
 
     // Declared here, outside the screen branches below, so opening Details and coming back keeps the reader where they were.
     val listState = rememberLazyListState()
@@ -313,6 +333,13 @@ fun ConversationScreen(repo: SmsRepository, address: String, privateMode: Boolea
     // The list is anchored to the bottom (newest message last on screen). Follow new messages unless the reader scrolled up.
     // Keep the waiting message in view when it appears.
     LaunchedEffect(pendingBody != null) { if (pendingBody != null) listState.scrollToItem(0) }
+    // Search: new text starts at the newest match, and the list scrolls to whichever match is current.
+    LaunchedEffect(activeQuery) { matchPos = (matches.size - 1).coerceAtLeast(0) }
+    LaunchedEffect(currentMatchId) {
+        val id = currentMatchId ?: return@LaunchedEffect
+        val at = rows.indexOfFirst { it is MessageRow && it.m.id == id }
+        if (at >= 0) listState.animateScrollToItem((if (pendingBody != null) 1 else 0) + at, -(listState.layoutInfo.viewportSize.height / 3))
+    }
     LaunchedEffect(newest?.id) {
         if (newest != null && (newest.outgoing || listState.firstVisibleItemIndex <= 2)) listState.scrollToItem(0)
     }
@@ -347,7 +374,35 @@ fun ConversationScreen(repo: SmsRepository, address: String, privateMode: Boolea
             modifier = Modifier.imePadding().then(if (menuMessage != null && android.os.Build.VERSION.SDK_INT >= 31) Modifier.blur(12.dp) else Modifier),
             containerColor = chatBackgroundColor(look),
             topBar = {
-                if (selecting) {
+                if (searching && !selecting) {
+                    val focus = remember { androidx.compose.ui.focus.FocusRequester() }
+                    LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
+                    TopAppBar(
+                        colors = smsTopBarColors(),
+                        navigationIcon = { IconButton(onClick = ::closeSearch) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Close search") } },
+                        title = {
+                            TextField(
+                                value = searchQuery, onValueChange = { searchQuery = it }, singleLine = true,
+                                placeholder = { Text("Search this conversation") },
+                                keyboardOptions = KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Search),
+                                keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSearch = { stepMatch(older = true) }),
+                                colors = TextFieldDefaults.colors(
+                                    focusedContainerColor = Color.Transparent, unfocusedContainerColor = Color.Transparent,
+                                    focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent
+                                ),
+                                modifier = Modifier.fillMaxWidth().focusRequester(focus)
+                            )
+                        },
+                        actions = {
+                            if (activeQuery.isNotEmpty()) Text(
+                                if (matches.isEmpty()) "0" else "${matchPos.coerceIn(0, matches.lastIndex) + 1}/${matches.size}",
+                                style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            IconButton(onClick = { stepMatch(older = true) }, enabled = matches.isNotEmpty()) { Icon(Icons.Default.KeyboardArrowUp, "Previous match (older)") }
+                            IconButton(onClick = { stepMatch(older = false) }, enabled = matches.isNotEmpty()) { Icon(Icons.Default.KeyboardArrowDown, "Next match (newer)") }
+                        }
+                    )
+                } else if (selecting) {
                     TopAppBar(
                         colors = smsTopBarColors(),
                         title = { Text("${selectedIds.size} selected") },
@@ -376,9 +431,11 @@ fun ConversationScreen(repo: SmsRepository, address: String, privateMode: Boolea
                             IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
                         },
                         actions = {
+                            IconButton(onClick = { searching = true }) { Icon(Icons.Default.Search, contentDescription = "Search conversation") }
                             if (canCall) IconButton(onClick = ::callNumber) { Icon(Icons.Default.Call, contentDescription = "Call") }
                             IconButton(onClick = { menuExpanded = true }) { Icon(Icons.Default.MoreVert, contentDescription = "Conversation options") }
                             DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
+                                DropdownMenuItem(text = { Text("Search") }, onClick = { menuExpanded = false; searching = true })
                                 DropdownMenuItem(text = { Text("Contact details") }, onClick = { menuExpanded = false; showDetails = true })
                                 DropdownMenuItem(text = { Text("Notification settings") }, onClick = { menuExpanded = false; showNotificationSettings = true })
                                 if (!privateMode) DropdownMenuItem(
@@ -590,7 +647,7 @@ fun ConversationScreen(repo: SmsRepository, address: String, privateMode: Boolea
                                 color = bubbleBg,
                                 shape = bubbleShape(look.bubbleStyle, m.outgoing)
                             ) {
-                                if (numbers.isEmpty()) {
+                                if (numbers.isEmpty() && activeQuery.isEmpty()) {
                                     Text(
                                         m.body, color = fg, fontFamily = look.messageFont.family(),
                                         modifier = Modifier.padding(horizontal = 12.dp, vertical = look.spacing.pad.dp)
@@ -598,10 +655,12 @@ fun ConversationScreen(repo: SmsRepository, address: String, privateMode: Boolea
                                 } else {
                                     // Phone numbers in the text: tap dials, long-press copies. Anywhere else on the bubble behaves as usual.
                                     var layout by remember(m.id) { mutableStateOf<TextLayoutResult?>(null) }
-                                    val styled = remember(m.body) {
+                                    val isCurrentMatch = m.id == currentMatchId
+                                    val styled = remember(m.body, numbers, activeQuery, isCurrentMatch) {
                                         buildAnnotatedString {
                                             append(m.body)
                                             numbers.forEach { addStyle(SpanStyle(textDecoration = TextDecoration.Underline, fontWeight = FontWeight.SemiBold), it.first, it.last + 1) }
+                                            highlightMatches(m.body, activeQuery, isCurrentMatch)
                                         }
                                     }
                                     Text(
@@ -768,6 +827,19 @@ internal fun statusLabel(status: String): String = when {
 
 private fun contextPrefs(context: android.content.Context) = context.getSharedPreferences("sms_settings", android.content.Context.MODE_PRIVATE)
 
+
+/** Marks every occurrence of the search text in a message; the message the search is currently on gets the stronger colour. */
+private fun androidx.compose.ui.text.AnnotatedString.Builder.highlightMatches(body: String, query: String, current: Boolean) {
+    if (query.isEmpty()) return
+    val background = if (current) Color(0xFFFFB300) else Color(0xFFFFE082)
+    var from = 0
+    while (true) {
+        val at = body.indexOf(query, from, ignoreCase = true)
+        if (at < 0) break
+        addStyle(SpanStyle(background = background, color = Color.Black), at, at + query.length)
+        from = at + query.length
+    }
+}
 
 private sealed interface ChatRow { val key: String }
 private data class MessageRow(val m: MessageEntity) : ChatRow { override val key: String get() = "m${m.id}" }

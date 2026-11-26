@@ -68,6 +68,9 @@ interface MessageDao {
     @Query("UPDATE messages SET isVaulted = :locked WHERE address = :address AND deletedAt IS NULL") suspend fun setVaulted(address: String, locked: Boolean)
     @Query("SELECT * FROM messages WHERE address = :address AND deletedAt IS NULL") suspend fun messagesForAddress(address: String): List<MessageEntity>
     @Query("UPDATE messages SET body = :body WHERE id = :id") suspend fun updateBody(id: Long, body: String)
+    /** Private messages still in the older, slow encryption format (see VaultCrypto), a chunk at a time. */
+    @Query("SELECT * FROM messages WHERE isVaulted = 1 AND body LIKE 'vault:v1:%' AND body NOT LIKE 'vault:v1:s.%' AND id > :afterId ORDER BY id LIMIT 200")
+    suspend fun legacyVaultRows(afterId: Long): List<MessageEntity>
     @Query("UPDATE messages SET isStarred = :starred WHERE id = :id") suspend fun setStarred(id: Long, starred: Boolean)
     @Query("UPDATE messages SET isArchived = :archived WHERE address = :address") suspend fun setArchived(address: String, archived: Boolean)
     @Query("UPDATE messages SET isSpam = :spam WHERE address = :address") suspend fun setSpam(address: String, spam: Boolean)

@@ -21,11 +21,14 @@ class SmsApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        com.example.smsapp.security.VaultCrypto.init(this)
         NotificationHelper.createChannels(this)
         // Keep WorkManager consistent with Room after updates, restarts or restored data.
         CoroutineScope(Dispatchers.IO).launch { runCatching { Scheduler.reconcile(this@SmsApp) } }
         // Bin: empty out conversations that have been in it for more than 30 days (now, and once a day after that).
         CoroutineScope(Dispatchers.IO).launch { runCatching { repo.purgeExpiredBin() } }
+        // Private chats: convert old messages to the fast encryption format in the background (a one-off, slow only the first time).
+        CoroutineScope(Dispatchers.IO).launch { runCatching { repo.migrateVaultEncryption() } }
         BinCleanupWorker.schedule(this)
     }
 }

@@ -376,6 +376,22 @@ class SmsRepository(private val context: Context, private val dao: MessageDao) {
     suspend fun archive(address: String, value: Boolean) = dao.setArchived(address, value)
     suspend fun block(address: String, value: Boolean) = dao.setSpam(address, value)
 
+    /**
+     * One-time conversion of private messages from the old slow encryption format to the fast one. Safe to run on every launch:
+     * once everything is converted the query finds nothing. A row that cannot be read is left as it is.
+     */
+    suspend fun migrateVaultEncryption() = withContext(Dispatchers.IO) {
+        var after = 0L
+        while (true) {
+            val rows = dao.legacyVaultRows(after)
+            if (rows.isEmpty()) break
+            rows.forEach { row ->
+                after = row.id
+                runCatching { dao.updateBody(row.id, VaultCrypto.encrypt(VaultCrypto.decrypt(row.body))) }
+            }
+        }
+    }
+
     /** (imported so far, total) while the first-time import runs; null otherwise. The conversation list shows it. */
     private val _importProgress = kotlinx.coroutines.flow.MutableStateFlow<Pair<Int, Int>?>(null)
     val importProgress: kotlinx.coroutines.flow.StateFlow<Pair<Int, Int>?> = _importProgress

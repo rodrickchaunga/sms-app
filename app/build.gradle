@@ -15,6 +15,16 @@ android {
         versionCode 2
         versionName "2.0.0"
     }
+    // Sign every build with the same committed key. Without this each GitHub build gets a new random debug key, and Android
+    // refuses to update an installed app that was signed with a different key (you would have to uninstall and lose private chats).
+    signingConfigs {
+        debug {
+            storeFile file('debug.keystore')
+            storePassword 'android'
+            keyAlias 'androiddebugkey'
+            keyPassword 'android'
+        }
+    }
     buildFeatures { compose true }
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
